@@ -2,7 +2,12 @@
 
 **Hack-Nation Global AI Hackathon 2026 · Challenge #04 (Databricks × Virtue Foundation) · Track: Facility Trust Desk**
 
-**Live app:** https://trust-desk-7474650580216748.aws.databricksapps.com (Databricks Free Edition login required)
+**Live app:** https://trust-desk-7474650580216748.aws.databricksapps.com
+
+> **Reviewer access:** Databricks Apps require workspace authentication, so the link above prompts for a
+> Databricks login. The demo video shows the complete workflow end-to-end; verified UI screenshots are in
+> `assets/`. To try it live, send any email address to vahevahevahe@gmail.com and I'll add you to the
+> workspace within minutes — or run `tools/smoke` against your own deployment using the run instructions below.
 
 An NGO planner deciding where to send an ICU program has 10,088 scraped facility records. "Has ICU" might be marketing. Coordinates might be in the ocean. Trust Desk answers the track question — *can this facility do what it claims?* — with cited evidence, honest uncertainty, and persistent human judgment.
 

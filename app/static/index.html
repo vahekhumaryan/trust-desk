@@ -151,7 +151,35 @@
       </div>
       <div id="list"><div id="loading">Pick a capability to rank facilities.</div></div>
     </div>
-    <div id="detail"><div class="placeholder">Select a facility to inspect the evidence behind its claims.</div></div>
+    <div id="detail">
+      <div class="placeholder" style="margin-top:40px;text-align:left;max-width:560px;margin-left:auto;margin-right:auto">
+        <h2 style="color:var(--text);font-size:19px;margin-bottom:10px">You're planning a health program. The data is lying to you.</h2>
+        <p style="font-size:13.5px;line-height:1.6;margin-bottom:16px">
+          10,088 scraped facility records claim capabilities they may not have — <b style="color:var(--text)">half of all
+          ICU and NICU claims have zero supporting evidence</b> in their own record, and one Kerala hospital is
+          geocoded to the middle of the Atlantic. Trust Desk shows you which claims you can act on, and proves it.
+        </p>
+        <div style="display:grid;gap:10px;font-size:13.5px">
+          <div style="background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px">
+            <b style="color:var(--accent)">1 · Pick a capability and region</b><br>
+            <span style="color:var(--muted)">Facilities rank by evidence, not marketing — the score is a 0–100 audit of corroboration, completeness, web footprint and location validity.</span>
+          </div>
+          <div style="background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px">
+            <b style="color:var(--accent)">2 · Inspect the receipts</b><br>
+            <span style="color:var(--muted)">Every point traces to quoted text. Ask the AI auditor for a second opinion — it cites exact sentences and runs medical-consistency checks.</span>
+          </div>
+          <div style="background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px">
+            <b style="color:var(--accent)">3 · Record your decision</b><br>
+            <span style="color:var(--muted)">Confirm, dispute, shortlist — with your reasons. Your team sees it next session, on every ranking.</span>
+          </div>
+        </div>
+        <p style="font-size:12.5px;color:var(--muted);margin-top:14px">
+          Also: <a href="/map.html" style="color:var(--accent)">Crisis Map</a> separates "no hospitals here" from
+          "we don't know what's here" · <a href="/method.html" style="color:var(--accent)">How scoring works</a>
+          explains every number, including what we can't know.
+        </p>
+      </div>
+    </div>
   </main>
 <script>
 const CAPS = ["icu","nicu","emergency","maternity","oncology","trauma","dialysis","surgery"];
@@ -342,7 +370,7 @@ function renderRows(rows, fromShortlist) {
       : r.trust_score;
     div.innerHTML = `
       <div class="name">${esc(r.name)}</div>
-      <div class="score-badge ${scoreClass(r.trust_score)}" title="${esc(r.tier)}">${scoreTxt}</div>
+      <div class="score-badge ${scoreClass(r.trust_score)}" title="Evidence score 0–100: corroboration 40 + completeness 20 + web 25 + geo 15 − penalties. ${esc(r.tier)}. Click the row for the receipts.">${scoreTxt}</div>
       <div class="loc">${esc(r.city || "—")}, ${esc(r.state || "—")} · ${esc(r.tier)}</div>
       <div class="sig">${humanTag}${corrTag}${geoTag}${penTag}${uncTag}</div>`;
     div.onclick = () => {
@@ -400,6 +428,13 @@ function loadDetail(id) {
           <div class="fact"><div class="k">Web presence /25</div><div class="v">${f.web_score}</div></div>
           <div class="fact"><div class="k">Geo validity /15</div><div class="v">${f.geo_score}${f.geo_in_india ? "" : " ⚠"}</div></div>
           ${f.penalty > 0 ? `<div class="fact"><div class="k">Penalties</div><div class="v" style="color:var(--bad)">−${f.penalty}</div></div>` : ""}
+        </div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.7">
+          <b style="color:var(--text)">Receipts:</b>
+          corroboration ← ${f.n_claims} claim type(s) checked against equipment/procedures/description (quotes below) ·
+          web ← ${[f.officialWebsite && "official site", f.email && "email", f.officialPhone && "phone", f.facebook && "facebook", f.social_active && "active socials"].filter(Boolean).join(" + ") || "no verifiable footprint"} ·
+          geo ← ${f.geo_in_india ? "coordinates inside India" : "⚠ coordinates NOT in India"}${f.pin_checked ? ", PIN " + f.pin_checked + " found in India Post directory" : ", PIN not verifiable"}${f.pin_state ? " (" + esc(f.pin_state) + ")" : ""} ·
+          ${f.anesthesia_signal ? "anesthesia signal present" : "⚠ no anesthesia signal anywhere"}
         </div></section>`;
     $("detail").innerHTML = `
       <h2>${esc(f.name)}</h2>

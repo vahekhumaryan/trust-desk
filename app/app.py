@@ -686,7 +686,8 @@ def facility_detail(unique_id: str, capability: str | None = None):
                        t.trust_score, t.trust_hi, t.uncertainty, t.evidence_label,
                        t.tier, t.corr_score, t.completeness_score,
                        t.web_score, t.geo_score, t.penalty, t.anesthesia_signal,
-                       t.obs_fields
+                       t.obs_fields, t.facebook, t.social_active,
+                       t.pincode AS pin_checked, t.pin_state, t.n_claims
                 FROM {FACILITIES} r JOIN {TRUST} t ON r.unique_id = t.unique_id
                 WHERE r.unique_id = ?""",
             [unique_id],
