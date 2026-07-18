@@ -9,6 +9,9 @@
 > `assets/`. To try it live, send any email address to vahevahevahe@gmail.com and I'll add you to the
 > workspace within minutes — or run `tools/smoke` against your own deployment using the run instructions below.
 
+
+![Trust Desk — evidence-ranked facilities with cited quotes](assets/ui-detail.png)
+
 An NGO planner deciding where to send an ICU program has 10,088 scraped facility records. "Has ICU" might be marketing. Coordinates might be in the ocean. Trust Desk answers the track question — *can this facility do what it claims?* — with cited evidence, honest uncertainty, and persistent human judgment.
 
 ## The finding that drives the product
