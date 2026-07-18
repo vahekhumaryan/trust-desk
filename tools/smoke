@@ -1,0 +1,35 @@
+#!/bin/zsh
+# Pre-demo smoke test: checks every Trust Desk surface. Run: tools/smoke
+set -u
+export DATABRICKS_CONFIG_PROFILE=hackathon
+APP=https://trust-desk-7474650580216748.aws.databricksapps.com
+TOKEN=$(databricks auth token -p hackathon | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
+pass=0; fail=0
+check() { # name, condition-command...
+  local name=$1; shift
+  if "$@" >/dev/null 2>&1; then echo "✅ $name"; ((pass++)); else echo "❌ $name"; ((fail++)); fi
+}
+json_has() { # url, python-expr expected truthy against parsed json d
+  local url=$1 expr=$2
+  curl -sfS -m 60 -H "Authorization: Bearer $TOKEN" "$url" \
+    | python3 -c "import json,sys; d=json.load(sys.stdin); exit(0 if ($expr) else 1)"
+}
+
+check "app health + Lakebase"        json_has "$APP/api/health" "d['pg_ready'] is True"
+check "ranked facilities (gold)"     json_has "$APP/api/facilities?capability=icu" "len(d) > 50"
+check "facility detail + citations"  json_has "$APP/api/facilities?capability=icu&state=Kerala" "len(d) > 5"
+check "overrides read"               json_has "$APP/api/overrides" "isinstance(d, list)"
+check "shortlists read"              json_has "$APP/api/shortlists" "isinstance(d, list)"
+check "semantic search (hybrid)"     json_has "$APP/api/search?q=dialysis" "len(d['results']) > 3"
+check "referral (near Jaipur)"       json_has "$APP/api/refer?q=dialysis&near=Jaipur" "len(d['results']) > 3"
+check "review queue"                 json_has "$APP/api/review_queue" "len(d) > 50"
+check "map points"                   json_has "$APP/api/map?capability=maternity" "len(d['points']) > 1000"
+check "district gaps"                json_has "$APP/api/districts?capability=maternity" "len(d) > 500"
+check "vector index status"          databricks vector-search-indexes get-index workspace.hackathon.facility_text_index
+check "genie space"                  databricks genie get-space 01f182dca5b810e38dc2c3863bcab99b
+check "dashboard"                    databricks lakeview get 01f182dd7cc5197a881aada0eedf000f
+check "MLflow experiment"            databricks experiments get-experiment 4503398429584691
+
+echo "---"
+echo "$pass passed, $fail failed"
+exit $fail
