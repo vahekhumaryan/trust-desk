@@ -1,6 +1,8 @@
 """Trust Desk — healthcare facility trust explorer (Databricks App backend)."""
 
+import json
 import os
+import re
 import threading
 import time
 
@@ -21,6 +23,50 @@ SELECT count(*) n,
                 then 1 else 0 end) geo_ok
 FROM databricks_virtue_foundation_dataset_dais_2026.virtue_foundation_dataset.facilities
 """
+
+FACILITIES = "workspace.hackathon.facilities_raw"
+TRUST = "workspace.hackathon.facility_trust"
+
+# Regex patterns per capability — MUST stay in sync with sql/gold_trust.sql.
+# Word boundaries on short tokens (icu/hdu/nicu) prevent substring hits like
+# "Calicut". Corroboration = the same signal appearing independently in
+# equipment / procedure / description, not just in the capability claim.
+CAPABILITY_KEYWORDS = {
+    "icu": [r"\bicu\b", "intensive care", "critical care", "ventilator", r"\bhdu\b"],
+    "maternity": ["matern", "obstet", "deliver", "labour", "labor room", "gynec", "midwif"],
+    "emergency": ["emergency", "casualty", "ambulance", "24x7", "24 x 7", "24/7"],
+    "oncology": ["oncolog", "cancer", "chemother", "radiother", "radiation therap", "tumor", "tumour"],
+    "trauma": ["trauma", "accident", "fracture", "orthopa"],
+    "nicu": [r"\bnicu\b", "neonatal", "incubator", "premature", "newborn"],
+    "dialysis": ["dialysis", "nephrolog", "kidney", "renal"],
+    "surgery": ["surger", "surgical", "operation theat", "operating theat", "anesthes", "anaesthes"],
+}
+
+
+def _matches(patterns: list[str], text: str) -> bool:
+    low = text.lower()
+    return any(re.search(p, low) for p in patterns)
+
+
+def ranked_facilities_sql(capability: str, state: str | None) -> tuple[str, list]:
+    # capability comes from the CAPABILITY_KEYWORDS whitelist, never user input
+    params: list = []
+    state_filter = ""
+    if state:
+        state_filter = "AND lower(state) = lower(?)"
+        params.append(state)
+    sql = f"""
+SELECT unique_id, name, city, state, latitude, longitude,
+       capacity_n, doctors_n, year_est,
+       claim_{capability} AS claimed, corr_{capability} AS corroborations,
+       corr_score, completeness_score, web_score, geo_score, penalty,
+       geo_in_india AS geo_valid, trust_score, tier
+FROM {TRUST}
+WHERE claim_{capability} {state_filter}
+ORDER BY trust_score DESC, corroborations DESC
+LIMIT 100
+"""
+    return sql, params
 
 app = FastAPI(title="Trust Desk")
 
@@ -43,7 +89,7 @@ def _store(key: str, value):
 
 
 # ---- SQL helper --------------------------------------------------------------
-def run_query(query: str):
+def run_query(query: str, params: list | None = None):
     cfg = Config()  # picks up app service-principal creds injected by the runtime
     with dbsql.connect(
         server_hostname=cfg.host,
@@ -51,7 +97,7 @@ def run_query(query: str):
         credentials_provider=lambda: cfg.authenticate,
     ) as conn:
         with conn.cursor() as cur:
-            cur.execute(query)
+            cur.execute(query, params or [])
             cols = [c[0] for c in cur.description]
             return [dict(zip(cols, row)) for row in cur.fetchall()]
 
@@ -137,6 +183,91 @@ def health():
         "pg_ready": getattr(app.state, "pg_ready", None),
         "pg_error": getattr(app.state, "pg_error", None),
     }
+
+
+@app.get("/api/capabilities")
+def capabilities():
+    return sorted(CAPABILITY_KEYWORDS.keys())
+
+
+@app.get("/api/states")
+def states():
+    cached = _cached("states")
+    if cached is not None:
+        return cached
+    try:
+        rows = run_query(
+            f"""SELECT state, count(*) n FROM {TRUST}
+                WHERE state IS NOT NULL
+                GROUP BY 1 HAVING count(*) >= 5 ORDER BY 1"""
+        )
+        result = [{"state": r["state"], "n": r["n"]} for r in rows]
+        _store("states", result)
+        return result
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/facilities")
+def facilities(capability: str, state: str | None = None):
+    if capability not in CAPABILITY_KEYWORDS:
+        return JSONResponse(status_code=400, content={"error": f"unknown capability '{capability}'"})
+    cache_key = f"fac:{capability}:{state or '*'}"
+    cached = _cached(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        sql_text, params = ranked_facilities_sql(capability, state)
+        rows = run_query(sql_text, params)
+        _store(cache_key, rows)
+        return rows
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/facility/{unique_id}")
+def facility_detail(unique_id: str, capability: str | None = None):
+    try:
+        rows = run_query(
+            f"""SELECT r.unique_id, r.name, r.description,
+                       r.capability, r.procedure, r.equipment, r.specialties,
+                       t.address_line1, t.city AS address_city,
+                       t.state AS address_stateOrRegion, t.pincode AS address_zipOrPostcode,
+                       t.latitude, t.longitude, t.geo_in_india,
+                       t.doctors_n AS numberDoctors, t.capacity_n AS capacity,
+                       t.year_est AS yearEstablished,
+                       t.email, t.phone AS officialPhone, t.website AS officialWebsite,
+                       t.trust_score, t.tier, t.corr_score, t.completeness_score,
+                       t.web_score, t.geo_score, t.penalty, t.anesthesia_signal
+                FROM {FACILITIES} r JOIN {TRUST} t ON r.unique_id = t.unique_id
+                WHERE r.unique_id = ?""",
+            [unique_id],
+        )
+        if not rows:
+            return JSONResponse(status_code=404, content={"error": "not found"})
+        row = rows[0]
+        # Claim fields are JSON arrays of free-text strings — parse them so the
+        # frontend can render row-level citations.
+        for field in ("capability", "procedure", "equipment", "specialties"):
+            try:
+                row[field] = json.loads(row[field]) if row[field] else []
+            except (ValueError, TypeError):
+                row[field] = [row[field]] if row[field] else []
+        if capability in CAPABILITY_KEYWORDS:
+            kws = CAPABILITY_KEYWORDS[capability]
+            row["matched_keywords"] = kws
+            row["citations"] = {
+                field: [c for c in row[field] if _matches(kws, c)]
+                for field in ("capability", "procedure", "equipment")
+            }
+            desc = row.get("description") or ""
+            row["citations"]["description"] = [
+                s.strip() for s in desc.replace("\n", " ").split(".")
+                if _matches(kws, s)
+            ][:5]
+        return row
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @app.post("/api/overrides")
