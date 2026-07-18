@@ -44,6 +44,10 @@
   mark { background: rgba(14,124,134,.14); color: inherit; border-radius: 4px; padding: 0 3px; font-weight: 700; }
   .warn-note { color: var(--warn); font-size: 13px; margin: 8px 0; }
   #loading { padding: 30px; color: var(--muted); }
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; }
+    .col + .col { border-left: none; border-top: 1px solid var(--border); }
+  }
 </style>
 </head>
 <body>

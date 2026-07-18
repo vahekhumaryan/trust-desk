@@ -47,6 +47,11 @@
     border-radius: 10px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 10px; }
   .leaflet-container { font: inherit; }
   .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--panel); color: var(--text); }
+  @media (max-width: 900px) {
+    main { flex-direction: column; height: auto; }
+    #map { height: 55vh; flex: none; }
+    #side { flex: none; width: 100%; border-left: none; border-top: 1px solid var(--border); max-height: 42vh; }
+  }
 </style>
 </head>
 <body>
