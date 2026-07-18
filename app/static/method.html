@@ -84,6 +84,21 @@
       across sessions, displayed on every ranking.</li>
   </ul>
 
+  <h2>Does the signal mean anything? (self-validation without ground truth)</h2>
+  <div class="box">If corroboration were random keyword noise, whether a facility's <i>equipment</i> list
+  supports a claim would be independent of whether its <i>procedures</i> list does. It isn't. Among
+  facilities where both fields are observable:</div>
+  <table>
+    <tr><th>Claim</th><th>n</th><th>P(equip corroborates)</th><th>P(proc corroborates)</th>
+        <th>P(both) — expected if independent</th><th>P(both) — observed</th><th>Odds ratio</th></tr>
+    <tr><td>ICU</td><td>1,929</td><td>41.3%</td><td>10.7%</td><td>4.4%</td><td><b>5.8%</b></td><td><b>1.8</b></td></tr>
+    <tr><td>Maternity</td><td>2,688</td><td>11.4%</td><td>46.1%</td><td>5.3%</td><td><b>8.3%</b></td><td><b>3.6</b></td></tr>
+    <tr><td>Dialysis</td><td>1,446</td><td>27.2%</td><td>63.3%</td><td>17.2%</td><td><b>23.4%</b></td><td><b>5.1</b></td></tr>
+  </table>
+  <p class="muted">Corroboration clusters on the same facilities far above chance — consistent with a latent
+  "actually has the capability" factor rather than keyword coincidence. This is the strongest validation
+  available when no ground truth exists; field visits (the override layer) remain the only true test.</p>
+
   <h2>Known limits (read before trusting the tool that measures trust)</h2>
   <ul>
     <li>Corroboration uses keyword patterns with word boundaries; paraphrases can be missed. The AI audit
