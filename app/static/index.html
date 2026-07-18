@@ -268,6 +268,10 @@ function loadDetail(id) {
         <div class="fact"><div class="k">Coordinates</div><div class="v">${f.latitude != null ? f.latitude.toFixed(2) + ", " + f.longitude.toFixed(2) : "—"}${f.geo_in_india ? "" : " · outside India ⚠"}</div></div>
       </div>
       ${claimCites}${corrHtml}${noCorr}
+      <section><h3>AI evidence audit</h3>
+        <button class="obtn" id="verifyBtn">🔍 Verify ${CAP_LABELS[curCap]} claim with AI</button>
+        <div id="verifyOut"></div>
+      </section>
       <section><h3>Full description</h3><div class="desc">${highlight(f.description || "—", kws)}</div></section>
       <section><h3>Your assessment (persists across sessions)</h3>
         <div id="override">
@@ -291,7 +295,44 @@ function loadDetail(id) {
         x.className = "obtn" + (x === b ? " active-" + curVerdict : ""));
     });
     $("ovSave").onclick = saveOverride;
+    $("verifyBtn").onclick = runVerify;
     renderOverrides(ovs);
+  });
+}
+
+const VERDICT_COLOR = {corroborated: "var(--good)", plausible: "var(--warn)",
+  unsupported: "var(--warn)", contradicted: "var(--bad)"};
+
+function runVerify() {
+  $("verifyBtn").disabled = true;
+  $("verifyOut").innerHTML = `<div id="loading">Claude is auditing the evidence… (~10s, then cached)</div>`;
+  fetch("/api/verify", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({facility_id: curFacility, capability: curCap}),
+  }).then(r => r.json()).then(v => {
+    $("verifyBtn").disabled = false;
+    if (v.error) { $("verifyOut").innerHTML = `<div class="empty-note">Error: ${esc(v.error)}</div>`; return; }
+    const col = VERDICT_COLOR[v.verdict] || "var(--muted)";
+    $("verifyOut").innerHTML = `
+      <div class="cite" style="border-left-color:${col}">
+        <b style="color:${col};text-transform:uppercase">${esc(v.verdict)}</b>
+        · confidence ${(v.confidence * 100).toFixed(0)}%
+        ${v.cached ? '· <span class="tag">cached</span>' : ""}
+        <div style="margin-top:6px">${esc(v.summary)}</div>
+      </div>
+      ${(v.evidence || []).map(e => `
+        <div class="cite ${e.supports ? "corr" : ""}" ${e.supports ? "" : 'style="border-left-color:var(--bad)"'}>
+          <span class="src">${esc(e.field)} ${e.supports ? "· supports" : "· against"}</span>“${esc(e.quote)}”
+        </div>`).join("")}
+      ${(v.consistency_checks || []).map(c => `
+        <div style="font-size:13px;padding:3px 0">
+          ${c.passed ? "✅" : "❌"} ${esc(c.rule)} <span style="color:var(--muted)">— ${esc(c.note)}</span>
+        </div>`).join("")}
+      <div style="color:var(--muted);font-size:11.5px;margin-top:6px">
+        Reasoning traced in MLflow · ${(v.reasoning_steps || []).length} steps · Databricks FM API</div>`;
+  }).catch(e => {
+    $("verifyBtn").disabled = false;
+    $("verifyOut").innerHTML = `<div class="empty-note">Request failed: ${esc(String(e))}</div>`;
   });
 }
 

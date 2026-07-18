@@ -11,3 +11,5 @@ env:
     value: "4c8cec5ddedd872b"
   - name: LAKEBASE_ENDPOINT
     value: "projects/trust-desk-db/branches/production/endpoints/primary"
+  - name: VERIFIER_ENDPOINT
+    value: "databricks-gpt-oss-120b"

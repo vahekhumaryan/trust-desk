@@ -152,6 +152,13 @@ CREATE TABLE IF NOT EXISTS trust_desk.shortlists (
     facility_ids jsonb NOT NULL DEFAULT '[]',
     created_at   timestamptz NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS trust_desk.verifications (
+    facility_id text NOT NULL,
+    capability  text NOT NULL,
+    result      jsonb NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (facility_id, capability)
+);
 """
 
 
@@ -165,6 +172,119 @@ def init_db():
     except Exception as e:
         app.state.pg_ready = False
         app.state.pg_error = str(e)
+
+
+# ---- LLM evidence verifier (on-demand, cached, MLflow-traced) ----------------
+SERVING_ENDPOINT = os.getenv("VERIFIER_ENDPOINT", "databricks-gpt-oss-120b")
+MLFLOW_EXPERIMENT_ID = os.getenv("MLFLOW_EXPERIMENT_ID", "4503398429584691")
+
+try:
+    import mlflow
+
+    mlflow.set_tracking_uri("databricks")
+    mlflow.set_experiment(experiment_id=MLFLOW_EXPERIMENT_ID)
+    _trace = mlflow.trace
+except Exception:  # tracing must never take the app down
+    def _trace(fn=None, **kw):
+        return fn if fn else (lambda f: f)
+
+
+VERIFY_PROMPT = """You are an evidence auditor for NGO healthcare planning in India.
+Facility claims are scraped free text and may be marketing, not capability.
+
+Assess whether this facility can actually deliver: {capability}
+
+FACILITY RECORD (the only evidence you may use):
+name: {name}
+capability claims: {cap}
+procedures: {proc}
+equipment: {equip}
+description: {desc}
+specialties: {specs}
+beds: {beds} | doctors: {doctors} | year established: {year}
+
+Rules:
+- Cite EXACT quotes from the record for every piece of evidence. Never invent.
+- Advanced claims need corroborating operational detail (equipment models, unit
+  sizes, named staff/departments), not keyword repetition.
+- Apply medical-consistency checks, e.g. surgery needs an anesthesia signal,
+  ICU needs ventilators/monitoring, NICU needs incubators/warmers, dialysis
+  needs machines/nephrology.
+- Data absence is uncertainty, NOT evidence of absence — say so explicitly.
+
+Respond with ONLY this JSON (no markdown fence):
+{{"verdict": "corroborated|plausible|unsupported|contradicted",
+ "confidence": 0.0-1.0,
+ "summary": "<=2 sentences for a non-technical planner",
+ "evidence": [{{"field": "...", "quote": "...", "supports": true/false}}],
+ "consistency_checks": [{{"rule": "...", "passed": true/false, "note": "..."}}],
+ "reasoning_steps": ["...", "..."]}}"""
+
+
+@_trace(name="verify_capability")
+def run_verification(facility_id: str, capability: str) -> dict:
+    rows = run_query(
+        f"""SELECT r.name, r.capability, r.procedure, r.equipment, r.description,
+                   r.specialties, t.capacity_n, t.doctors_n, t.year_est
+            FROM {FACILITIES} r JOIN {TRUST} t ON r.unique_id = t.unique_id
+            WHERE r.unique_id = ?""",
+        [facility_id],
+    )
+    if not rows:
+        raise ValueError("facility not found")
+    r = rows[0]
+    prompt = VERIFY_PROMPT.format(
+        capability=capability, name=r["name"], cap=r["capability"],
+        proc=r["procedure"], equip=r["equipment"],
+        desc=(r["description"] or "")[:4000], specs=r["specialties"],
+        beds=r["capacity_n"], doctors=r["doctors_n"], year=r["year_est"],
+    )
+    w = WorkspaceClient()
+    resp = w.api_client.do(
+        "POST",
+        f"/serving-endpoints/{SERVING_ENDPOINT}/invocations",
+        body={"messages": [{"role": "user", "content": prompt}],
+              "max_tokens": 1500, "temperature": 0.0},
+    )
+    content = resp["choices"][0]["message"]["content"]
+    if isinstance(content, list):  # reasoning models return a list of blocks
+        content = " ".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") in ("text", "output_text")
+        )
+    start, end = content.find("{"), content.rfind("}")
+    return json.loads(content[start:end + 1])
+
+
+class VerifyIn(BaseModel):
+    facility_id: str
+    capability: str
+
+
+@app.post("/api/verify")
+def verify(body: VerifyIn):
+    if body.capability not in CAPABILITY_KEYWORDS:
+        return JSONResponse(status_code=400, content={"error": "unknown capability"})
+    try:
+        with pg_conn() as conn:
+            row = conn.execute(
+                """SELECT result, created_at FROM trust_desk.verifications
+                   WHERE facility_id = %s AND capability = %s""",
+                (body.facility_id, body.capability),
+            ).fetchone()
+        if row:
+            return {"cached": True, "created_at": row[1].isoformat(), **row[0]}
+        result = run_verification(body.facility_id, body.capability)
+        with pg_conn() as conn:
+            conn.execute(
+                """INSERT INTO trust_desk.verifications (facility_id, capability, result)
+                   VALUES (%s, %s, %s)
+                   ON CONFLICT (facility_id, capability) DO UPDATE SET result = EXCLUDED.result""",
+                (body.facility_id, body.capability, json.dumps(result)),
+            )
+        return {"cached": False, **result}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 class OverrideIn(BaseModel):
