@@ -5,23 +5,20 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏥</text></svg>">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 
 <title>Trust Desk — Compare evidence</title>
 <style>
-  :root { --bg:#0b0d14; --panel:#131624; --border:#272c42; --text:#f2f4ff;
-    --muted:#8b93b0; --accent:#ff4d6d; --accent2:#a855f7;
-    --grad: linear-gradient(100deg, #ff4d6d, #a855f7 70%);
-    --good:#34d399; --warn:#fbbf24; --bad:#fb7185; }
-  h1, h2 { font-family: "Space Grotesk", -apple-system, sans-serif; }
+  :root { --bg:#f4f7f8; --panel:#ffffff; --border:#d9e2e8; --text:#12313d;
+    --muted:#5b7280; --accent:#0e7c86; --accent2:#0a5c64;
+    --grad: linear-gradient(100deg, #0e7c86, #0a5c64);
+    --good:#15803d; --warn:#b45309; --bad:#b91c1c; }
+  h1, h2 { font-family: "Inter", -apple-system, sans-serif; }
   header { position: relative; }
   header::before { content:""; position:absolute; top:0; left:0; right:0; height:2px; background:var(--grad); }
   header h1 { background: var(--grad); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; font-weight: 700; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); background-image:
-      radial-gradient(700px 420px at 88% -8%, rgba(168,85,247,.16), transparent 70%),
-      radial-gradient(600px 380px at -8% 108%, rgba(255,77,109,.13), transparent 70%);
-    background-attachment: fixed;  line-height: 1.5;
+  body { background: var(--bg); color: var(--text);  line-height: 1.5;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   header { padding: 14px 28px; border-bottom: 1px solid var(--border); display: flex; gap: 14px; align-items: baseline; }
   header h1 { font-size: 18px; }
@@ -33,9 +30,9 @@
   .loc { color: var(--muted); font-size: 12.5px; margin-bottom: 12px; }
   .scorebar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
   .score-badge { font-size: 22px; font-weight: 700; padding: 10px 16px; border-radius: 12px; }
-  .score-hi { background: rgba(63,185,80,.12); color: var(--good); }
-  .score-mid { background: rgba(210,153,34,.12); color: var(--warn); }
-  .score-lo { background: rgba(248,81,73,.12); color: var(--bad); }
+  .score-hi { background: rgba(21,128,61,.09); color: var(--good); box-shadow: inset 0 0 0 1px rgba(21,128,61,.3); }
+  .score-mid { background: rgba(180,83,9,.09); color: var(--warn); box-shadow: inset 0 0 0 1px rgba(180,83,9,.3); }
+  .score-lo { background: rgba(185,28,28,.07); color: var(--bad); box-shadow: inset 0 0 0 1px rgba(185,28,28,.3); }
   .tierline { font-size: 13px; color: var(--muted); }
   .facts { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
   .fact { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font-size: 12.5px; }
@@ -44,7 +41,7 @@
   .cite { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent);
     border-radius: 8px; padding: 8px 11px; font-size: 13px; margin-bottom: 5px; }
   .cite.corr { border-left-color: var(--good); }
-  mark { background: rgba(255,95,70,.25); color: inherit; border-radius: 3px; padding: 0 2px; }
+  mark { background: rgba(14,124,134,.14); color: inherit; border-radius: 4px; padding: 0 3px; font-weight: 700; }
   .warn-note { color: var(--warn); font-size: 13px; margin: 8px 0; }
   #loading { padding: 30px; color: var(--muted); }
 </style>

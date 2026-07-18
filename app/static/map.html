@@ -5,25 +5,22 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏥</text></svg>">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 
 <title>Trust Desk — Crisis Map</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
-  :root { --bg:#0b0d14; --panel:#131624; --border:#272c42; --text:#f2f4ff;
-    --muted:#8b93b0; --accent:#ff4d6d; --accent2:#a855f7;
-    --grad: linear-gradient(100deg, #ff4d6d, #a855f7 70%);
-    --good:#34d399; --warn:#fbbf24; --bad:#fb7185; }
-  h1, h2 { font-family: "Space Grotesk", -apple-system, sans-serif; }
+  :root { --bg:#f4f7f8; --panel:#ffffff; --border:#d9e2e8; --text:#12313d;
+    --muted:#5b7280; --accent:#0e7c86; --accent2:#0a5c64;
+    --grad: linear-gradient(100deg, #0e7c86, #0a5c64);
+    --good:#15803d; --warn:#b45309; --bad:#b91c1c; }
+  h1, h2 { font-family: "Inter", -apple-system, sans-serif; }
   header { position: relative; }
   header::before { content:""; position:absolute; top:0; left:0; right:0; height:2px; background:var(--grad); }
   header h1 { background: var(--grad); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; font-weight: 700; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); background-image:
-      radial-gradient(700px 420px at 88% -8%, rgba(168,85,247,.16), transparent 70%),
-      radial-gradient(600px 380px at -8% 108%, rgba(255,77,109,.13), transparent 70%);
-    background-attachment: fixed; 
+  body { background: var(--bg); color: var(--text); 
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   header { padding: 14px 28px; border-bottom: 1px solid var(--border);
     display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
@@ -35,7 +32,7 @@
   .chip.active { background: var(--accent); border-color: var(--accent); font-weight: 600; }
   .toggle { display: flex; gap: 6px; margin-left: auto; }
   main { display: flex; height: calc(100vh - 55px); }
-  #map { flex: 1; background: #0a0e13; }
+  #map { flex: 1; background: #e8eef1; }
   #side { flex: 0 0 340px; border-left: 1px solid var(--border); overflow-y: auto; padding: 16px 18px; }
   #side h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
     color: var(--muted); margin: 14px 0 8px; }
@@ -46,7 +43,7 @@
   .stat b { font-size: 18px; display: block; }
   .drow { padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; }
   .drow .st { color: var(--muted); }
-  .badgeo { background: rgba(248,81,73,.08); border: 1px solid rgba(248,81,73,.35);
+  .badgeo { background: rgba(185,28,28,.06); border: 1px solid rgba(185,28,28,.3);
     border-radius: 10px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 10px; }
   .leaflet-container { font: inherit; }
   .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--panel); color: var(--text); }
@@ -83,7 +80,7 @@ const esc = s => (s ?? "").toString().replace(/[&<>"']/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 const map = L.map("map", {zoomControl: true}).setView([22.5, 80], 5);
-L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
   {attribution: "© OpenStreetMap © CARTO", maxZoom: 18}).addTo(map);
 
 for (const c of CAPS) {
@@ -97,16 +94,16 @@ for (const c of CAPS) {
 $("modeFac").onclick = () => { mode = "fac"; $("modeFac").classList.add("active"); $("modeDist").classList.remove("active"); render(); };
 $("modeDist").onclick = () => { mode = "dist"; $("modeDist").classList.add("active"); $("modeFac").classList.remove("active"); render(); };
 
-const FAC_COLORS = c => c >= 2 ? "#34d399" : c === 1 ? "#fbbf24" : "#fb7185";
-const DIST_COLORS = {data_desert: "#a855f7", no_capability: "#fb7185", unverified: "#fbbf24", covered: "#34d399"};
+const FAC_COLORS = c => c >= 2 ? "#16a34a" : c === 1 ? "#d97706" : "#dc2626";
+const DIST_COLORS = {data_desert: "#7c3aed", no_capability: "#dc2626", unverified: "#d97706", covered: "#16a34a"};
 
 function render() { if (layer) { map.removeLayer(layer); layer = null; } mode === "fac" ? renderFac() : renderDist(); }
 
 function renderFac() {
   $("legend").innerHTML = `
-    <div><span class="dot" style="background:#34d399"></span>Claim corroborated by 2+ fields</div>
-    <div><span class="dot" style="background:#fbbf24"></span>Corroborated by 1 field</div>
-    <div><span class="dot" style="background:#fb7185"></span>Claim only — no independent evidence</div>`;
+    <div><span class="dot" style="background:#16a34a"></span>Claim corroborated by 2+ fields</div>
+    <div><span class="dot" style="background:#d97706"></span>Corroborated by 1 field</div>
+    <div><span class="dot" style="background:#dc2626"></span>Claim only — no independent evidence</div>`;
   $("listTitle").textContent = "";  $("dlist").innerHTML = "";
   fetch(`/api/map?capability=${cap}`).then(r => r.json()).then(d => {
     if (d.error) { $("stats").innerHTML = esc(d.error); return; }
@@ -128,16 +125,16 @@ function renderFac() {
 
 function renderDist() {
   $("legend").innerHTML = `
-    <div><span class="dot" style="background:#a855f7"></span><b>Data desert</b> — zero facilities known (≠ zero care!)</div>
-    <div><span class="dot" style="background:#fb7185"></span>No ${LBL[cap]} claims in district</div>
-    <div><span class="dot" style="background:#fbbf24"></span>Claims exist, none corroborated</div>
-    <div><span class="dot" style="background:#34d399"></span>≥1 corroborated facility</div>`;
+    <div><span class="dot" style="background:#7c3aed"></span><b>Data desert</b> — zero facilities known (≠ zero care!)</div>
+    <div><span class="dot" style="background:#dc2626"></span>No ${LBL[cap]} claims in district</div>
+    <div><span class="dot" style="background:#d97706"></span>Claims exist, none corroborated</div>
+    <div><span class="dot" style="background:#16a34a"></span>≥1 corroborated facility</div>`;
   fetch(`/api/districts?capability=${cap}`).then(r => r.json()).then(rows => {
     if (rows.error) { $("stats").innerHTML = esc(rows.error); return; }
     const by = s => rows.filter(r => r.status === s).length;
     $("stats").innerHTML = `
       <div class="stat"><b>${rows.length}</b>districts (postal directory)</div>
-      <div class="stat" style="color:#a855f7"><b>${by("data_desert")}</b>data deserts — we simply don't know</div>
+      <div class="stat" style="color:#7c3aed"><b>${by("data_desert")}</b>data deserts — we simply don't know</div>
       <div class="stat" style="color:var(--warn)"><b>${by("unverified")}</b>districts where every ${LBL[cap]} claim is unverified</div>`;
     $("badgeo").innerHTML = "";
     layer = L.layerGroup(rows.map(r =>
