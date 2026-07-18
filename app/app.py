@@ -1,6 +1,7 @@
 """Trust Desk — healthcare facility trust explorer (Databricks App backend)."""
 
 import json
+import math
 import os
 import re
 import threading
@@ -285,6 +286,103 @@ def semantic_search(q: str, state: str | None = None):
         if "not ready" in msg.lower() or "PENDING" in msg or "provisioning" in msg.lower():
             msg = "Semantic index is still syncing — try again in a few minutes."
         return JSONResponse(status_code=503, content={"error": msg})
+
+
+# ---- Referral: care need near a place ----------------------------------------
+def _haversine_km(lat1, lon1, lat2, lon2):
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def _resolve_place(place: str):
+    """City name or 6-digit PIN → (lat, lon) centroid, or None."""
+    place = place.strip()
+    if re.fullmatch(r"[1-9][0-9]{5}", place):
+        rows = run_query(
+            """SELECT avg(try_cast(latitude AS double)) lat, avg(try_cast(longitude AS double)) lon
+               FROM workspace.hackathon.pincodes WHERE pincode = ?""",
+            [int(place)],
+        )
+    else:
+        rows = run_query(
+            f"""SELECT avg(latitude) lat, avg(longitude) lon FROM {TRUST}
+                WHERE lower(city) = lower(?) AND geo_in_india""",
+            [place],
+        )
+    if rows and rows[0]["lat"] is not None:
+        return rows[0]["lat"], rows[0]["lon"]
+    return None
+
+
+@app.get("/api/refer")
+def refer(q: str, near: str):
+    """Evidence-attached referral shortlist: semantic match x trust x distance."""
+    origin = _resolve_place(near)
+    if origin is None:
+        return JSONResponse(status_code=404, content={"error": f"Couldn't locate '{near}' (try a city name or 6-digit PIN)."})
+    try:
+        w = WorkspaceClient()
+        res = w.vector_search_indexes.query_index(
+            index_name=VS_INDEX,
+            columns=["unique_id", "name", "city", "state", "latitude", "longitude", "content"],
+            query_text=q,
+            num_results=50,
+        )
+        cols = [c.name for c in res.manifest.columns]
+        hits = [dict(zip(cols, row)) for row in (res.result.data_array or [])]
+        hits = [h for h in hits if h.get("latitude") is not None]
+        for h in hits:
+            h["distance_km"] = round(_haversine_km(origin[0], origin[1], h["latitude"], h["longitude"]), 1)
+            h["snippet"] = (h.pop("content", "") or "")[:200]
+        ids = [h["unique_id"] for h in hits]
+        if ids:
+            ph = ",".join("?" * len(ids))
+            tmap = {t["unique_id"]: t for t in run_query(
+                f"""SELECT unique_id, trust_score, trust_hi, uncertainty, evidence_label, tier
+                    FROM {TRUST} WHERE unique_id IN ({ph})""", ids)}
+            for h in hits:
+                h.update(tmap.get(h["unique_id"], {}))
+        # rank: prefer close + trusted; simple transparent formula, shown to user
+        for h in hits:
+            h["rank_score"] = round(float(h.get("trust_score") or 0) - 0.15 * h["distance_km"], 1)
+        hits.sort(key=lambda h: -h["rank_score"])
+        return {"origin": {"place": near, "lat": origin[0], "lon": origin[1]}, "results": hits[:15]}
+    except Exception as e:
+        return JSONResponse(status_code=503, content={"error": str(e)})
+
+
+# ---- Review queue: most suspicious records ------------------------------------
+@app.get("/api/review_queue")
+def review_queue():
+    cached = _cached("review_queue")
+    if cached is not None:
+        return cached
+    try:
+        rows = run_query(f"""
+SELECT unique_id, name, city, state, trust_score, tier, penalty,
+       concat_ws(' · ',
+         CASE WHEN NOT geo_in_india AND latitude IS NOT NULL THEN concat('coordinates outside India (', round(latitude,1), ', ', round(longitude,1), ')') END,
+         CASE WHEN latitude IS NULL THEN 'no coordinates' END,
+         CASE WHEN capacity_n > 5000 THEN concat('absurd capacity: ', capacity_n, ' beds') END,
+         CASE WHEN capacity_n = 0 THEN 'capacity listed as 0' END,
+         CASE WHEN doctors_n > 1000 THEN concat('absurd doctor count: ', doctors_n) END,
+         CASE WHEN year_est BETWEEN 0 AND 15 THEN concat('bogus year established: ', year_est) END,
+         CASE WHEN claim_surgery AND NOT anesthesia_signal AND capacity_n < 50 THEN 'surgery claim, no anesthesia signal, <50 beds' END,
+         CASE WHEN name IS NULL THEN 'no name (junk row)' END
+       ) AS reasons,
+       n_claims
+FROM {TRUST}
+WHERE penalty > 0 OR (NOT geo_in_india AND latitude IS NOT NULL)
+ORDER BY (name IS NULL) ASC, penalty DESC, n_claims DESC
+LIMIT 120""")
+        rows = [r for r in rows if r["reasons"]]
+        _store("review_queue", rows)
+        return rows
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 # ---- Map: medical desert vs data desert --------------------------------------

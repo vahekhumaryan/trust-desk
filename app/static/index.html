@@ -131,6 +131,7 @@
     <h1>Trust Desk</h1>
     <span class="sub">Can this facility do what it claims? · Databricks × Virtue Foundation</span>
     <a href="/map.html" style="color:var(--accent);font-size:13px;text-decoration:none">Crisis Map →</a>
+    <a href="#" onclick="loadReviewQueue();return false" style="color:var(--warn);font-size:13px;text-decoration:none">⚑ Review queue</a>
     <span id="stats"></span>
   </header>
   <main>
@@ -207,22 +208,65 @@ $("slSel").onchange = () => {
 };
 
 function semanticSearch() {
-  const q = $("semQ").value.trim();
+  const raw = $("semQ").value.trim();
+  // "dialysis near Jaipur" → referral mode with distance ranking
+  const m = raw.match(/^(.*)\s+near\s+(.+)$/i);
+  if (m) return referralSearch(m[1].trim(), m[2].trim());
   $("list").innerHTML = `<div id="loading">Searching 10,088 facilities semantically…</div>`;
-  const u = new URLSearchParams({q});
+  const u = new URLSearchParams({q: raw});
   if (curState) u.set("state", curState);
   fetch("/api/search?" + u).then(r => r.json()).then(d => {
     if (d.error) { $("list").innerHTML = `<div id="loading">${esc(d.error)}</div>`; return; }
     if (!d.results.length) { $("list").innerHTML = `<div id="loading">No matches.</div>`; return; }
+    renderSearchRows(d.results, r => `<span class="tag">semantic match</span>`);
+  });
+}
+
+function referralSearch(q, place) {
+  $("list").innerHTML = `<div id="loading">Finding “${esc(q)}” near ${esc(place)}…</div>`;
+  fetch(`/api/refer?` + new URLSearchParams({q, near: place})).then(r => r.json()).then(d => {
+    if (d.error) { $("list").innerHTML = `<div id="loading">${esc(d.error)}</div>`; return; }
+    if (!d.results.length) { $("list").innerHTML = `<div id="loading">No matches.</div>`; return; }
+    renderSearchRows(d.results, r =>
+      `<span class="tag on">${r.distance_km} km</span><span class="tag">rank = trust − 0.15·km</span>`);
+  });
+}
+
+function renderSearchRows(rows, tagFn) {
+  $("list").innerHTML = "";
+  for (const r of rows) {
+    const div = document.createElement("div");
+    div.className = "frow";
+    const uncTag = r.evidence_label === "speculative"
+      ? `<span class="tag claim">speculative</span>` : "";
+    div.innerHTML = `
+      <div class="name">${esc(r.name)}</div>
+      <div class="score-badge ${scoreClass(r.trust_score ?? 0)}">${r.trust_score ?? "—"}</div>
+      <div class="loc">${esc(r.city || "—")}, ${esc(r.state || "—")} · ${esc(r.tier || "")}</div>
+      <div class="sig">${tagFn(r)}${uncTag}</div>`;
+    div.onclick = () => {
+      document.querySelectorAll(".frow").forEach(x => x.classList.remove("sel"));
+      div.classList.add("sel");
+      loadDetail(r.unique_id);
+    };
+    $("list").appendChild(div);
+  }
+}
+
+function loadReviewQueue() {
+  document.querySelectorAll(".chip").forEach(x => x.classList.remove("active"));
+  $("list").innerHTML = `<div id="loading">Loading flagged records…</div>`;
+  fetch("/api/review_queue").then(r => r.json()).then(rows => {
+    if (!Array.isArray(rows)) { $("list").innerHTML = `<div id="loading">${esc(rows.error)}</div>`; return; }
     $("list").innerHTML = "";
-    for (const r of d.results) {
+    for (const r of rows) {
       const div = document.createElement("div");
       div.className = "frow";
       div.innerHTML = `
-        <div class="name">${esc(r.name)}</div>
-        <div class="score-badge ${scoreClass(r.trust_score ?? 0)}">${r.trust_score ?? "—"}</div>
-        <div class="loc">${esc(r.city || "—")}, ${esc(r.state || "—")} · ${esc(r.tier || "")}</div>
-        <div class="sig"><span class="tag">semantic match</span></div>`;
+        <div class="name">${esc(r.name || "(no name)")}</div>
+        <div class="score-badge ${scoreClass(r.trust_score)}">${r.trust_score}</div>
+        <div class="loc">${esc(r.city || "—")}, ${esc(r.state || "—")} · ${esc(r.tier)}</div>
+        <div class="sig"><span class="tag err">${esc(r.reasons)}</span></div>`;
       div.onclick = () => {
         document.querySelectorAll(".frow").forEach(x => x.classList.remove("sel"));
         div.classList.add("sel");
