@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+databricks-sdk>=0.81.0
+databricks-sql-connector
+psycopg[binary]
