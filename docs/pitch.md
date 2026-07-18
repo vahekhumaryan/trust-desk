@@ -37,5 +37,5 @@ Judging criteria coverage: user + workflow (Product 30%), citations/uncertainty/
 - [x] Row-level citations everywhere; honest uncertainty; desert distinction
 - [x] Persistence: overrides + shortlists + AI-audit cache (Lakebase)
 - [x] README with architecture + run instructions
-- [ ] Video ≤3 min (script above, 150s target) — narrated screen capture
-- [ ] Submit repo + app link + video
+- [x] Video: assets/trust-desk-demo.mp4 — 124s, neural narration, title/closing cards, ambient bed
+- [ ] Submit repo + app link + video (Vahe)
