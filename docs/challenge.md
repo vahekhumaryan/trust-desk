@@ -63,4 +63,4 @@ We get **10,000 messy records of Indian healthcare facilities** (51 columns: str
 
 ## Submission
 
-Git repo + live Databricks App. One-minute demo: user, workflow, technical approach, key tradeoffs.
+Git repo + live Databricks App + **pitch video, max 3 minutes** (per organizer instruction, overrides the "one-minute demo" wording in the PDF). Pitch must cover: user, workflow, technical approach, key tradeoffs. Record demo material as features land — don't leave the video for the last hour.
