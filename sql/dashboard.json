@@ -1,0 +1,255 @@
+{
+  "datasets": [
+    {
+      "name": "ds_trust",
+      "displayName": "Facility trust (gold)",
+      "queryLines": [
+        "SELECT unique_id, name, city, state, tier, evidence_label, trust_score, penalty, ",
+        "CASE WHEN penalty > 0 THEN 1 ELSE 0 END AS penalized, ",
+        "CASE WHEN evidence_label != 'solid' THEN 1 ELSE 0 END AS uncertain ",
+        "FROM facility_trust "
+      ]
+    },
+    {
+      "name": "ds_claims",
+      "displayName": "Claim-only rate per capability",
+      "queryLines": [
+        "SELECT capability, claims, claim_only, round(1.0*claim_only/claims,3) AS pct_claim_only FROM ( ",
+        "SELECT 'ICU' capability, sum(claim_icu::int) claims, sum((claim_icu AND corr_icu=0)::int) claim_only FROM facility_trust ",
+        "UNION ALL SELECT 'NICU', sum(claim_nicu::int), sum((claim_nicu AND corr_nicu=0)::int) FROM facility_trust ",
+        "UNION ALL SELECT 'Emergency', sum(claim_emergency::int), sum((claim_emergency AND corr_emergency=0)::int) FROM facility_trust ",
+        "UNION ALL SELECT 'Maternity', sum(claim_maternity::int), sum((claim_maternity AND corr_maternity=0)::int) FROM facility_trust ",
+        "UNION ALL SELECT 'Oncology', sum(claim_oncology::int), sum((claim_oncology AND corr_oncology=0)::int) FROM facility_trust ",
+        "UNION ALL SELECT 'Trauma', sum(claim_trauma::int), sum((claim_trauma AND corr_trauma=0)::int) FROM facility_trust ",
+        "UNION ALL SELECT 'Dialysis', sum(claim_dialysis::int), sum((claim_dialysis AND corr_dialysis=0)::int) FROM facility_trust ",
+        "UNION ALL SELECT 'Surgery', sum(claim_surgery::int), sum((claim_surgery AND corr_surgery=0)::int) FROM facility_trust ",
+        ") ORDER BY pct_claim_only DESC "
+      ]
+    },
+    {
+      "name": "ds_states",
+      "displayName": "Top states",
+      "queryLines": [
+        "SELECT state, count(*) AS n, round(avg(trust_score),1) AS avg_trust ",
+        "FROM facility_trust WHERE state IS NOT NULL ",
+        "GROUP BY state ORDER BY n DESC LIMIT 12 "
+      ]
+    },
+    {
+      "name": "ds_suspicious",
+      "displayName": "Suspicious records",
+      "queryLines": [
+        "SELECT name, city, state, trust_score, penalty, capacity_n, doctors_n ",
+        "FROM facility_trust ",
+        "WHERE penalty > 0 AND name IS NOT NULL ",
+        "AND facility_type IN ('hospital','clinic','dentist','doctor','pharmacy','farmacy','nursing_home') ",
+        "ORDER BY penalty DESC, trust_score DESC LIMIT 30 "
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "main",
+      "displayName": "Trust Landscape",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "multilineTextboxSpec": {"lines": ["# Trust Landscape — Indian Healthcare Facilities"]}
+          },
+          "position": {"x": 0, "y": 0, "width": 12, "height": 1}
+        },
+        {
+          "widget": {
+            "name": "subtitle",
+            "multilineTextboxSpec": {"lines": ["10,088 scraped facility records, scored for evidence quality. A claim is not a capability: roughly half of high-acuity claims have zero independent corroboration."]}
+          },
+          "position": {"x": 0, "y": 1, "width": 12, "height": 1}
+        },
+        {
+          "widget": {
+            "name": "kpi-facilities",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_trust",
+              "fields": [{"name": "count(unique_id)", "expression": "COUNT(`unique_id`)"}],
+              "disaggregated": false}}],
+            "spec": {"version": 2, "widgetType": "counter",
+              "encodings": {"value": {"fieldName": "count(unique_id)", "displayName": "Facilities"}},
+              "frame": {"showTitle": true, "title": "Facilities scored"}}
+          },
+          "position": {"x": 0, "y": 2, "width": 3, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "kpi-avg-trust",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_trust",
+              "fields": [{"name": "avg(trust_score)", "expression": "AVG(`trust_score`)"}],
+              "disaggregated": false}}],
+            "spec": {"version": 2, "widgetType": "counter",
+              "encodings": {"value": {"fieldName": "avg(trust_score)", "displayName": "Avg trust",
+                "format": {"type": "number", "decimalPlaces": {"type": "max", "places": 1}}}},
+              "frame": {"showTitle": true, "title": "Average trust score / 100"}}
+          },
+          "position": {"x": 3, "y": 2, "width": 3, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "kpi-uncertain",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_trust",
+              "fields": [{"name": "sum(uncertain)", "expression": "SUM(`uncertain`)"}],
+              "disaggregated": false}}],
+            "spec": {"version": 2, "widgetType": "counter",
+              "encodings": {"value": {"fieldName": "sum(uncertain)", "displayName": "Uncertain"}},
+              "frame": {"showTitle": true, "title": "Facilities with unobservable evidence"}}
+          },
+          "position": {"x": 6, "y": 2, "width": 3, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "kpi-suspicious",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_trust",
+              "fields": [{"name": "sum(penalized)", "expression": "SUM(`penalized`)"}],
+              "disaggregated": false}}],
+            "spec": {"version": 2, "widgetType": "counter",
+              "encodings": {"value": {"fieldName": "sum(penalized)", "displayName": "Penalized"}},
+              "frame": {"showTitle": true, "title": "Records with suspicion penalties"}}
+          },
+          "position": {"x": 9, "y": 2, "width": 3, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "claim-only-bar",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_claims",
+              "fields": [
+                {"name": "capability", "expression": "`capability`"},
+                {"name": "pct_claim_only", "expression": "`pct_claim_only`"}
+              ],
+              "disaggregated": true}}],
+            "spec": {"version": 3, "widgetType": "bar",
+              "encodings": {
+                "x": {"fieldName": "capability", "scale": {"type": "categorical", "sort": {"by": "value"}}, "displayName": "Capability"},
+                "y": {"fieldName": "pct_claim_only", "scale": {"type": "quantitative"}, "displayName": "Claim-only rate",
+                  "format": {"type": "number-percent", "decimalPlaces": {"type": "max", "places": 1}}}
+              },
+              "frame": {"showTitle": true, "title": "Claims with ZERO independent corroboration",
+                "showDescription": true, "description": "Share of capability claims backed by no other field in the record"}}
+          },
+          "position": {"x": 0, "y": 5, "width": 6, "height": 6}
+        },
+        {
+          "widget": {
+            "name": "tier-bar",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_trust",
+              "fields": [
+                {"name": "tier", "expression": "`tier`"},
+                {"name": "count(unique_id)", "expression": "COUNT(`unique_id`)"}
+              ],
+              "disaggregated": false}}],
+            "spec": {"version": 3, "widgetType": "bar",
+              "encodings": {
+                "x": {"fieldName": "tier", "scale": {"type": "categorical",
+                  "sort": {"by": "custom-order", "orderedValues": ["Trusted", "Plausible", "Thin evidence", "Red flag"]}},
+                  "displayName": "Tier"},
+                "y": {"fieldName": "count(unique_id)", "scale": {"type": "quantitative"}, "displayName": "Facilities"},
+                "color": {"fieldName": "tier", "scale": {"type": "categorical", "mappings": [
+                  {"value": "Trusted", "color": "#3FB950"},
+                  {"value": "Plausible", "color": "#D29922"},
+                  {"value": "Thin evidence", "color": "#FF7054"},
+                  {"value": "Red flag", "color": "#F85149"}
+                ]}}
+              },
+              "frame": {"showTitle": true, "title": "Trust tier distribution"}}
+          },
+          "position": {"x": 6, "y": 5, "width": 6, "height": 6}
+        },
+        {
+          "widget": {
+            "name": "states-bar",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_states",
+              "fields": [
+                {"name": "state", "expression": "`state`"},
+                {"name": "n", "expression": "`n`"}
+              ],
+              "disaggregated": true}}],
+            "spec": {"version": 3, "widgetType": "bar",
+              "encodings": {
+                "x": {"fieldName": "n", "scale": {"type": "quantitative"}, "displayName": "Facilities"},
+                "y": {"fieldName": "state", "scale": {"type": "categorical", "sort": {"by": "value"}}, "displayName": "State"}
+              },
+              "frame": {"showTitle": true, "title": "Facilities by state (top 12)"}}
+          },
+          "position": {"x": 0, "y": 11, "width": 6, "height": 6}
+        },
+        {
+          "widget": {
+            "name": "evidence-pie",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_trust",
+              "fields": [
+                {"name": "evidence_label", "expression": "`evidence_label`"},
+                {"name": "count(unique_id)", "expression": "COUNT(`unique_id`)"}
+              ],
+              "disaggregated": false}}],
+            "spec": {"version": 3, "widgetType": "pie",
+              "encodings": {
+                "angle": {"fieldName": "count(unique_id)", "scale": {"type": "quantitative"}, "displayName": "Facilities"},
+                "color": {"fieldName": "evidence_label", "scale": {"type": "categorical", "mappings": [
+                  {"value": "solid", "color": "#3FB950"},
+                  {"value": "moderate", "color": "#D29922"},
+                  {"value": "speculative", "color": "#F85149"}
+                ]}},
+                "label": {"show": true}
+              },
+              "frame": {"showTitle": true, "title": "Evidence observability (uncertainty label)",
+                "showDescription": true, "description": "speculative = wide score range because fields are unobservable"}}
+          },
+          "position": {"x": 6, "y": 11, "width": 6, "height": 6}
+        },
+        {
+          "widget": {
+            "name": "suspicious-table",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_suspicious",
+              "fields": [
+                {"name": "name", "expression": "`name`"},
+                {"name": "city", "expression": "`city`"},
+                {"name": "state", "expression": "`state`"},
+                {"name": "trust_score", "expression": "`trust_score`"},
+                {"name": "penalty", "expression": "`penalty`"},
+                {"name": "capacity_n", "expression": "`capacity_n`"},
+                {"name": "doctors_n", "expression": "`doctors_n`"}
+              ],
+              "disaggregated": true}}],
+            "spec": {"version": 2, "widgetType": "table",
+              "encodings": {"columns": [
+                {"fieldName": "name", "displayName": "Facility"},
+                {"fieldName": "city", "displayName": "City"},
+                {"fieldName": "state", "displayName": "State"},
+                {"fieldName": "trust_score", "displayName": "Trust score"},
+                {"fieldName": "penalty", "displayName": "Penalty"},
+                {"fieldName": "capacity_n", "displayName": "Claimed beds"},
+                {"fieldName": "doctors_n", "displayName": "Claimed doctors"}
+              ]},
+              "frame": {"showTitle": true, "title": "Most suspicious records (named facilities)",
+                "showDescription": true, "description": "e.g. 200,000 claimed beds; multi-speciality with <10 beds; surgery with no anesthesia signal"}}
+          },
+          "position": {"x": 0, "y": 17, "width": 12, "height": 7}
+        }
+      ]
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "canvasBackgroundColor": {"light": "#FCFCFC", "dark": "#0D1117"},
+      "widgetBackgroundColor": {"light": "#FFFFFF", "dark": "#161B22"},
+      "fontColor": {"light": "#11171C", "dark": "#E6EDF3"},
+      "selectionColor": {"light": "#2272B4", "dark": "#8ACAFF"},
+      "visualizationColors": ["#FF5F46", "#D29922", "#3FB950", "#4E79A7", "#6E40C9", "#76B7B2", "#1D425C"],
+      "widgetHeaderAlignment": "LEFT"
+    },
+    "genieSpace": {
+      "isEnabled": true,
+      "overrideId": "01f182dca5b810e38dc2c3863bcab99b",
+      "enablementMode": "ENABLED"
+    }
+  }
+}
