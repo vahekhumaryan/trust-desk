@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trust Desk — How the score works</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --border:#262d36; --text:#e6edf3;
+    --muted:#8b949e; --accent:#ff5f46; --good:#3fb950; --warn:#d29922; --bad:#f85149; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); line-height: 1.6;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 14px 28px; border-bottom: 1px solid var(--border); display: flex; gap: 14px; align-items: baseline; }
+  header h1 { font-size: 18px; }
+  header a { color: var(--accent); font-size: 13px; text-decoration: none; }
+  main { max-width: 860px; margin: 0 auto; padding: 36px 24px 80px; }
+  h2 { font-size: 17px; margin: 30px 0 10px; }
+  p, li { font-size: 14px; color: var(--text); }
+  ul { padding-left: 22px; margin: 8px 0; }
+  .muted { color: var(--muted); }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13.5px; }
+  th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+  th { background: var(--panel); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  .pill { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .g { background: rgba(63,185,80,.15); color: var(--good); }
+  .w { background: rgba(210,153,34,.15); color: var(--warn); }
+  .b { background: rgba(248,81,73,.15); color: var(--bad); }
+  code { background: var(--panel); border: 1px solid var(--border); border-radius: 5px;
+    padding: 1px 6px; font-size: 12.5px; }
+  .box { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 12px 16px; margin: 12px 0; font-size: 13.5px; }
+</style>
+</head>
+<body>
+<header><h1>How the trust score works</h1><a href="/">← Trust Desk</a></header>
+<main>
+  <p class="muted">No ground truth exists for these 10,088 facilities. Instead of pretending
+  certainty, Trust Desk scores <b>how well each claim is supported by the record itself</b> —
+  and says explicitly what it cannot know. Every number below is computed in SQL over
+  Unity Catalog tables; nothing is a black box.</p>
+
+  <h2>The score: 0–100 from four observable signals</h2>
+  <table>
+    <tr><th>Signal</th><th>Points</th><th>What it measures</th></tr>
+    <tr><td><b>Corroboration</b></td><td>40</td><td>For each claimed capability (ICU, surgery, …): does the same
+      signal appear <i>independently</i> in equipment, procedures, or the description? 2+ fields = full credit,
+      1 field = half, claim-only = zero. This is the discriminating signal: 45–51% of high-acuity claims
+      in this dataset have zero corroboration.</td></tr>
+    <tr><td><b>Completeness</b></td><td>20</td><td>8 checks (plausible bed count, doctor count, year, real
+      description, specialties, non-filler equipment &amp; procedures). Separates curated records from thin scrapes.</td></tr>
+    <tr><td><b>Web presence</b></td><td>25</td><td>Verifiable footprint: official website (directories like
+      justdial excluded), email, phone, Facebook, active social metrics.</td></tr>
+    <tr><td><b>Geo validity</b></td><td>15</td><td>Coordinates inside India, postal code exists in the
+      165,627-row India Post directory, state consistent with that postal record.</td></tr>
+  </table>
+
+  <h2>Penalties for suspicious data</h2>
+  <ul>
+    <li>Junk/misaligned row (−15) · "multi-speciality" with &lt;10 beds (−5)</li>
+    <li>Absurd values: capacity 0 or &gt;5,000 · &gt;1,000 doctors · bogus founding year (−3 each)</li>
+    <li>Surgery claim with no anesthesia signal at a small facility (−3) — kept soft because 73% of all
+      surgery claims lack an anesthesia mention, including major real hospitals</li>
+  </ul>
+
+  <h2>Tiers</h2>
+  <p><span class="pill g">≥75 Trusted</span> <span class="pill w">50–74 Plausible</span>
+  <span class="pill w">25–49 Thin evidence</span> <span class="pill b">&lt;25 Red flag</span></p>
+
+  <h2>Uncertainty: absence of data ≠ absence of care</h2>
+  <div class="box">A facility with no equipment list <i>cannot</i> be corroborated by equipment — that is
+  missing data, not a failed check. For every facility we also compute the score it <i>could</i> reach if
+  its unobservable fields were favorable. The width of that range is the facility's <b>data deficit</b>:
+  <span class="pill g">≤10 solid</span> <span class="pill w">≤25 moderate</span>
+  <span class="pill b">&gt;25 speculative</span>. 1,284 of 10,088 facilities are moderate or speculative —
+  the app shows the range, not just the point.</div>
+
+  <h2>Three layers of skepticism</h2>
+  <ul>
+    <li><b>SQL evidence score</b> — deterministic, explainable, covers all 10,088 rows.</li>
+    <li><b>AI evidence audit</b> — on-demand LLM cross-examination (Databricks FM API): verdict, confidence,
+      exact quotes only, medical-consistency checks (ICU⇒ventilators, surgery⇒anesthesia). Cached in
+      Lakebase, every reasoning step traced in MLflow. It can and does disagree with the SQL score.</li>
+    <li><b>Human override</b> — the planner's judgment wins: confirm / dispute / flag with a note, persisted
+      across sessions, displayed on every ranking.</li>
+  </ul>
+
+  <h2>Known limits (read before trusting the tool that measures trust)</h2>
+  <ul>
+    <li>Corroboration uses keyword patterns with word boundaries; paraphrases can be missed. The AI audit
+      exists precisely to catch these.</li>
+    <li>All fields were extracted from the same web sources by an LLM pipeline — "independent fields" are
+      independent extractions, not independent sources. True independence needs site visits: that is what
+      the override layer records.</li>
+    <li>Web presence rewards digitally-visible facilities; rural facilities may be under-scored. The
+      uncertainty range partially compensates (missing web data widens it).</li>
+    <li>The score ranks evidence quality, not clinical quality.</li>
+  </ul>
+
+  <p class="muted" style="margin-top:28px">Pipeline: Marketplace dataset → Unity Catalog →
+  silver (cleaned, deduped) → gold (per-capability corroboration + scores) → this app.
+  Persistence: Lakebase Postgres. Search: Mosaic AI Vector Search (gte-large-en).
+  Tracing: MLflow 3. All on Databricks Free Edition.</p>
+</main>
+</body>
+</html>

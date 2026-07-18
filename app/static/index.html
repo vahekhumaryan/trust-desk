@@ -132,6 +132,7 @@
     <span class="sub">Can this facility do what it claims? · Databricks × Virtue Foundation</span>
     <a href="/map.html" style="color:var(--accent);font-size:13px;text-decoration:none">Crisis Map →</a>
     <a href="#" onclick="loadReviewQueue();return false" style="color:var(--warn);font-size:13px;text-decoration:none">⚑ Review queue</a>
+    <a href="/method.html" style="color:var(--muted);font-size:13px;text-decoration:none">How scoring works</a>
     <span id="stats"></span>
   </header>
   <main>
@@ -327,6 +328,12 @@ function renderRows(rows, fromShortlist) {
       ? `<span class="tag claim">speculative — ±${r.uncertainty} pts unobservable</span>`
       : r.evidence_label === "moderate"
       ? `<span class="tag">±${r.uncertainty} pts unobservable</span>` : "";
+    const humanTag = r.human_verdict === "confirm"
+      ? `<span class="tag on">✓ planner confirmed</span>`
+      : r.human_verdict === "dispute"
+      ? `<span class="tag err">✗ planner disputed</span>`
+      : r.human_verdict === "flag"
+      ? `<span class="tag claim">⚑ flagged for review</span>` : "";
     const scoreTxt = r.uncertainty > 5
       ? `${r.trust_score}<span style="font-size:11px;font-weight:500;display:block">–${r.trust_hi}</span>`
       : r.trust_score;
@@ -334,7 +341,7 @@ function renderRows(rows, fromShortlist) {
       <div class="name">${esc(r.name)}</div>
       <div class="score-badge ${scoreClass(r.trust_score)}" title="${esc(r.tier)}">${scoreTxt}</div>
       <div class="loc">${esc(r.city || "—")}, ${esc(r.state || "—")} · ${esc(r.tier)}</div>
-      <div class="sig">${corrTag}${geoTag}${penTag}${uncTag}</div>`;
+      <div class="sig">${humanTag}${corrTag}${geoTag}${penTag}${uncTag}</div>`;
     div.onclick = () => {
       document.querySelectorAll(".frow").forEach(x => x.classList.remove("sel"));
       div.classList.add("sel");

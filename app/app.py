@@ -617,18 +617,37 @@ def states():
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+def _latest_overrides(capability: str) -> dict:
+    """facility_id -> latest human verdict for this capability (or any)."""
+    try:
+        with pg_conn() as conn:
+            rows = conn.execute(
+                """SELECT DISTINCT ON (facility_id) facility_id, verdict
+                   FROM trust_desk.overrides
+                   WHERE capability = %s OR capability IS NULL
+                   ORDER BY facility_id, created_at DESC""",
+                (capability,),
+            ).fetchall()
+        return {r[0]: r[1] for r in rows}
+    except Exception:
+        return {}
+
+
 @app.get("/api/facilities")
 def facilities(capability: str, state: str | None = None):
     if capability not in CAPABILITY_KEYWORDS:
         return JSONResponse(status_code=400, content={"error": f"unknown capability '{capability}'"})
     cache_key = f"fac:{capability}:{state or '*'}"
-    cached = _cached(cache_key)
-    if cached is not None:
-        return cached
+    rows = _cached(cache_key)
     try:
-        sql_text, params = ranked_facilities_sql(capability, state)
-        rows = run_query(sql_text, params)
-        _store(cache_key, rows)
+        if rows is None:
+            sql_text, params = ranked_facilities_sql(capability, state)
+            rows = run_query(sql_text, params)
+            _store(cache_key, rows)
+        # merge live human verdicts AFTER the cache — overrides must show instantly
+        ov = _latest_overrides(capability)
+        if ov:
+            rows = [{**r, "human_verdict": ov.get(r["unique_id"])} for r in rows]
         return rows
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
