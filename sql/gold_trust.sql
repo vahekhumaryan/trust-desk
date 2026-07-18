@@ -52,7 +52,10 @@ caps AS (
 
     (capability_s RLIKE 'anesth|anaesth' OR equipment_s RLIKE 'anesth|anaesth'
       OR procedure_s RLIKE 'anesth|anaesth' OR description_s RLIKE 'anesth|anaesth'
-      OR specialties_s RLIKE 'anesth|anaesth') AS anesthesia_signal
+      OR specialties_s RLIKE 'anesth|anaesth') AS anesthesia_signal,
+    -- how many corroborating fields are even observable (blank field can never corroborate)
+    (cast(equipment IS NOT NULL AS int) + cast(procedure IS NOT NULL AS int)
+      + cast(description IS NOT NULL AS int)) AS obs_fields
   FROM workspace.hackathon.facilities_silver s
 ),
 scored AS (
@@ -70,6 +73,16 @@ scored AS (
    + CASE WHEN claim_nicu      THEN CASE WHEN corr_nicu >= 2      THEN 1.0 WHEN corr_nicu = 1      THEN 0.5 ELSE 0 END ELSE 0 END
    + CASE WHEN claim_dialysis  THEN CASE WHEN corr_dialysis >= 2  THEN 1.0 WHEN corr_dialysis = 1  THEN 0.5 ELSE 0 END ELSE 0 END
     ) AS credit_sum,
+    -- optimistic credit: blank fields granted as corroborating (upper bound of what we can't observe)
+    (CASE WHEN claim_icu       THEN CASE WHEN corr_icu       + 3 - obs_fields >= 2 THEN 1.0 WHEN corr_icu       + 3 - obs_fields = 1 THEN 0.5 ELSE 0 END ELSE 0 END
+   + CASE WHEN claim_surgery   THEN CASE WHEN corr_surgery   + 3 - obs_fields >= 2 THEN 1.0 WHEN corr_surgery   + 3 - obs_fields = 1 THEN 0.5 ELSE 0 END ELSE 0 END
+   + CASE WHEN claim_maternity THEN CASE WHEN corr_maternity + 3 - obs_fields >= 2 THEN 1.0 WHEN corr_maternity + 3 - obs_fields = 1 THEN 0.5 ELSE 0 END ELSE 0 END
+   + CASE WHEN claim_emergency THEN CASE WHEN corr_emergency + 3 - obs_fields >= 2 THEN 1.0 WHEN corr_emergency + 3 - obs_fields = 1 THEN 0.5 ELSE 0 END ELSE 0 END
+   + CASE WHEN claim_oncology  THEN CASE WHEN corr_oncology  + 3 - obs_fields >= 2 THEN 1.0 WHEN corr_oncology  + 3 - obs_fields = 1 THEN 0.5 ELSE 0 END ELSE 0 END
+   + CASE WHEN claim_trauma    THEN CASE WHEN corr_trauma    + 3 - obs_fields >= 2 THEN 1.0 WHEN corr_trauma    + 3 - obs_fields = 1 THEN 0.5 ELSE 0 END ELSE 0 END
+   + CASE WHEN claim_nicu      THEN CASE WHEN corr_nicu      + 3 - obs_fields >= 2 THEN 1.0 WHEN corr_nicu      + 3 - obs_fields = 1 THEN 0.5 ELSE 0 END ELSE 0 END
+   + CASE WHEN claim_dialysis  THEN CASE WHEN corr_dialysis  + 3 - obs_fields >= 2 THEN 1.0 WHEN corr_dialysis  + 3 - obs_fields = 1 THEN 0.5 ELSE 0 END ELSE 0 END
+    ) AS credit_hi_sum,
     -- B. Completeness (20): 8 checks x 2.5
     2.5 * (cast((name IS NOT NULL AND name NOT RLIKE '^\\[') IS TRUE AS int)
          + cast((capacity_n BETWEEN 1 AND 5000) IS TRUE AS int)
@@ -102,6 +115,15 @@ scored AS (
    + CASE WHEN claim_surgery AND NOT anesthesia_signal AND capacity_n < 50 THEN 3 ELSE 0 END) AS penalty
   FROM caps c
   LEFT JOIN pin_dim p ON c.pincode = p.pincode
+),
+final AS (
+  SELECT *,
+    CASE WHEN n_claims = 0 THEN 20.0 ELSE 40.0 * credit_sum / n_claims END AS corr_pts,
+    CASE WHEN n_claims = 0 THEN 20.0 ELSE 40.0 * credit_hi_sum / n_claims END AS corr_pts_hi,
+    -- geo points that are unknowable rather than failed (null coords, no parseable pincode)
+    (CASE WHEN latitude IS NULL THEN 8 ELSE 0 END
+   + CASE WHEN pincode IS NULL THEN 7 ELSE 0 END) AS geo_unknown_pts
+  FROM scored
 )
 SELECT unique_id, name, facility_type, operator_type, address_line1, city, state,
        pincode, pin_district, pin_state, latitude, longitude, geo_in_india,
@@ -109,19 +131,29 @@ SELECT unique_id, name, facility_type, operator_type, address_line1, city, state
        claim_icu, corr_icu, claim_surgery, corr_surgery, claim_maternity, corr_maternity,
        claim_emergency, corr_emergency, claim_oncology, corr_oncology,
        claim_trauma, corr_trauma, claim_nicu, corr_nicu, claim_dialysis, corr_dialysis,
-       anesthesia_signal, n_claims,
-       round(CASE WHEN n_claims = 0 THEN 20.0 ELSE 40.0 * credit_sum / n_claims END, 1) AS corr_score,
+       anesthesia_signal, n_claims, obs_fields,
+       round(corr_pts, 1) AS corr_score,
        completeness_score, web_score, geo_score, penalty,
-       greatest(0, round(
-         (CASE WHEN n_claims = 0 THEN 20.0 ELSE 40.0 * credit_sum / n_claims END)
-         + completeness_score + web_score + geo_score - penalty, 1)) AS trust_score,
+       greatest(0, round(corr_pts + completeness_score + web_score + geo_score - penalty, 1))
+         AS trust_score,
+       least(100, greatest(0, round(
+         corr_pts_hi + completeness_score + web_score + geo_score + geo_unknown_pts - penalty, 1)))
+         AS trust_hi,
+       round(least(100, greatest(0,
+         corr_pts_hi + completeness_score + web_score + geo_score + geo_unknown_pts - penalty))
+         - greatest(0, corr_pts + completeness_score + web_score + geo_score - penalty), 1)
+         AS uncertainty,
        CASE
-         WHEN greatest(0, (CASE WHEN n_claims = 0 THEN 20.0 ELSE 40.0 * credit_sum / n_claims END)
-              + completeness_score + web_score + geo_score - penalty) >= 75 THEN 'Trusted'
-         WHEN greatest(0, (CASE WHEN n_claims = 0 THEN 20.0 ELSE 40.0 * credit_sum / n_claims END)
-              + completeness_score + web_score + geo_score - penalty) >= 50 THEN 'Plausible'
-         WHEN greatest(0, (CASE WHEN n_claims = 0 THEN 20.0 ELSE 40.0 * credit_sum / n_claims END)
-              + completeness_score + web_score + geo_score - penalty) >= 25 THEN 'Thin evidence'
+         WHEN least(100, greatest(0, corr_pts_hi + completeness_score + web_score + geo_score + geo_unknown_pts - penalty))
+              - greatest(0, corr_pts + completeness_score + web_score + geo_score - penalty) <= 10 THEN 'solid'
+         WHEN least(100, greatest(0, corr_pts_hi + completeness_score + web_score + geo_score + geo_unknown_pts - penalty))
+              - greatest(0, corr_pts + completeness_score + web_score + geo_score - penalty) <= 25 THEN 'moderate'
+         ELSE 'speculative'
+       END AS evidence_label,
+       CASE
+         WHEN greatest(0, corr_pts + completeness_score + web_score + geo_score - penalty) >= 75 THEN 'Trusted'
+         WHEN greatest(0, corr_pts + completeness_score + web_score + geo_score - penalty) >= 50 THEN 'Plausible'
+         WHEN greatest(0, corr_pts + completeness_score + web_score + geo_score - penalty) >= 25 THEN 'Thin evidence'
          ELSE 'Red flag'
        END AS tier
-FROM scored
+FROM final

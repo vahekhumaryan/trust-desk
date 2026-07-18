@@ -60,7 +60,8 @@ SELECT unique_id, name, city, state, latitude, longitude,
        capacity_n, doctors_n, year_est,
        claim_{capability} AS claimed, corr_{capability} AS corroborations,
        corr_score, completeness_score, web_score, geo_score, penalty,
-       geo_in_india AS geo_valid, trust_score, tier
+       geo_in_india AS geo_valid, trust_score, trust_hi, uncertainty,
+       evidence_label, tier
 FROM {TRUST}
 WHERE claim_{capability} {state_filter}
 ORDER BY trust_score DESC, corroborations DESC
@@ -172,6 +173,75 @@ def init_db():
     except Exception as e:
         app.state.pg_ready = False
         app.state.pg_error = str(e)
+
+
+# ---- Shortlists (Lakebase persistence) ---------------------------------------
+class ShortlistToggle(BaseModel):
+    name: str
+    facility_id: str
+
+
+@app.get("/api/shortlists")
+def list_shortlists():
+    try:
+        with pg_conn() as conn:
+            rows = conn.execute(
+                "SELECT id, name, facility_ids, created_at FROM trust_desk.shortlists ORDER BY created_at"
+            ).fetchall()
+        return [
+            {"id": r[0], "name": r[1], "facility_ids": r[2], "created_at": r[3].isoformat()}
+            for r in rows
+        ]
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/shortlists/toggle")
+def toggle_shortlist(body: ShortlistToggle):
+    try:
+        with pg_conn() as conn:
+            row = conn.execute(
+                "SELECT id, facility_ids FROM trust_desk.shortlists WHERE name = %s",
+                (body.name.strip(),),
+            ).fetchone()
+            if row is None:
+                conn.execute(
+                    "INSERT INTO trust_desk.shortlists (name, facility_ids) VALUES (%s, %s)",
+                    (body.name.strip(), json.dumps([body.facility_id])),
+                )
+                return {"name": body.name.strip(), "member": True, "count": 1}
+            ids = list(row[1] or [])
+            member = body.facility_id in ids
+            ids = [i for i in ids if i != body.facility_id] if member else ids + [body.facility_id]
+            conn.execute(
+                "UPDATE trust_desk.shortlists SET facility_ids = %s WHERE id = %s",
+                (json.dumps(ids), row[0]),
+            )
+        return {"name": body.name.strip(), "member": not member, "count": len(ids)}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/shortlists/{sid}/facilities")
+def shortlist_facilities(sid: int):
+    try:
+        with pg_conn() as conn:
+            row = conn.execute(
+                "SELECT facility_ids FROM trust_desk.shortlists WHERE id = %s", (sid,)
+            ).fetchone()
+        ids = list(row[0] or []) if row else []
+        if not ids:
+            return []
+        ph = ",".join("?" * len(ids))
+        return run_query(
+            f"""SELECT unique_id, name, city, state, trust_score, trust_hi, uncertainty,
+                       evidence_label, tier, penalty, geo_in_india AS geo_valid,
+                       0 AS corroborations
+                FROM {TRUST} WHERE unique_id IN ({ph}) ORDER BY trust_score DESC""",
+            ids,
+        )
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 # ---- Semantic search (Vector Search) -----------------------------------------
@@ -478,8 +548,10 @@ def facility_detail(unique_id: str, capability: str | None = None):
                        t.doctors_n AS numberDoctors, t.capacity_n AS capacity,
                        t.year_est AS yearEstablished,
                        t.email, t.phone AS officialPhone, t.website AS officialWebsite,
-                       t.trust_score, t.tier, t.corr_score, t.completeness_score,
-                       t.web_score, t.geo_score, t.penalty, t.anesthesia_signal
+                       t.trust_score, t.trust_hi, t.uncertainty, t.evidence_label,
+                       t.tier, t.corr_score, t.completeness_score,
+                       t.web_score, t.geo_score, t.penalty, t.anesthesia_signal,
+                       t.obs_fields
                 FROM {FACILITIES} r JOIN {TRUST} t ON r.unique_id = t.unique_id
                 WHERE r.unique_id = ?""",
             [unique_id],

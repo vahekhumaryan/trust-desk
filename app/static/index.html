@@ -141,6 +141,7 @@
           <select id="stateSel"><option value="">All states</option></select>
           <input id="semQ" placeholder='or ask: "dialysis with transplant support"'
             style="flex:1;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px">
+          <select id="slSel" title="Saved shortlists"><option value="">Shortlists…</option></select>
         </div>
       </div>
       <div id="list"><div id="loading">Pick a capability to rank facilities.</div></div>
@@ -182,6 +183,28 @@ fetch("/api/states").then(r => r.json()).then(rows => {
 });
 $("stateSel").onchange = () => { curState = $("stateSel").value; if (curCap) loadList(); };
 $("semQ").addEventListener("keydown", e => { if (e.key === "Enter" && $("semQ").value.trim()) semanticSearch(); });
+
+// ---- shortlists ----
+let shortlists = [];
+function refreshShortlists() {
+  return fetch("/api/shortlists").then(r => r.json()).then(d => {
+    if (!Array.isArray(d)) return;
+    shortlists = d;
+    const sel = $("slSel");
+    sel.innerHTML = `<option value="">Shortlists…</option>` + d.map(s =>
+      `<option value="${s.id}">${esc(s.name)} (${(s.facility_ids || []).length})</option>`).join("");
+  });
+}
+refreshShortlists();
+$("slSel").onchange = () => {
+  const id = $("slSel").value;
+  if (!id) return;
+  $("list").innerHTML = `<div id="loading">Loading shortlist…</div>`;
+  fetch(`/api/shortlists/${id}/facilities`).then(r => r.json()).then(rows => {
+    if (!Array.isArray(rows) || !rows.length) { $("list").innerHTML = `<div id="loading">Shortlist is empty.</div>`; return; }
+    renderRows(rows, true);
+  });
+};
 
 function semanticSearch() {
   const q = $("semQ").value.trim();
@@ -240,29 +263,41 @@ function loadList() {
   fetch("/api/facilities?" + q).then(r => r.json()).then(rows => {
     if (!Array.isArray(rows)) { $("list").innerHTML = `<div id="loading">Error: ${esc(rows.error)}</div>`; return; }
     if (!rows.length) { $("list").innerHTML = `<div id="loading">No facilities claim ${CAP_LABELS[curCap]} here.</div>`; return; }
-    $("list").innerHTML = "";
-    for (const r of rows) {
-      const div = document.createElement("div");
-      div.className = "frow"; div.dataset.id = r.unique_id;
-      const corr = r.corroborations;
-      const corrTag = corr === 0
-        ? `<span class="tag claim">claim only — uncorroborated</span>`
-        : `<span class="tag on">${corr}/3 fields corroborate</span>`;
-      const geoTag = r.geo_valid ? "" : `<span class="tag err">bad coordinates</span>`;
-      const penTag = r.penalty > 0 ? `<span class="tag err">−${r.penalty} suspicious data</span>` : "";
-      div.innerHTML = `
-        <div class="name">${esc(r.name)}</div>
-        <div class="score-badge ${scoreClass(r.trust_score)}" title="${esc(r.tier)}">${r.trust_score}</div>
-        <div class="loc">${esc(r.city || "—")}, ${esc(r.state || "—")} · ${esc(r.tier)}</div>
-        <div class="sig">${corrTag}${geoTag}${penTag}</div>`;
-      div.onclick = () => {
-        document.querySelectorAll(".frow").forEach(x => x.classList.remove("sel"));
-        div.classList.add("sel");
-        loadDetail(r.unique_id);
-      };
-      $("list").appendChild(div);
-    }
+    renderRows(rows, false);
   });
+}
+
+function renderRows(rows, fromShortlist) {
+  $("list").innerHTML = "";
+  for (const r of rows) {
+    const div = document.createElement("div");
+    div.className = "frow"; div.dataset.id = r.unique_id;
+    const corr = r.corroborations;
+    const corrTag = fromShortlist ? `<span class="tag on">shortlisted</span>`
+      : corr === 0
+      ? `<span class="tag claim">claim only — uncorroborated</span>`
+      : `<span class="tag on">${corr}/3 fields corroborate</span>`;
+    const geoTag = r.geo_valid ? "" : `<span class="tag err">bad coordinates</span>`;
+    const penTag = !fromShortlist && r.penalty > 0 ? `<span class="tag err">−${r.penalty} suspicious data</span>` : "";
+    const uncTag = r.evidence_label === "speculative"
+      ? `<span class="tag claim">speculative — ±${r.uncertainty} pts unobservable</span>`
+      : r.evidence_label === "moderate"
+      ? `<span class="tag">±${r.uncertainty} pts unobservable</span>` : "";
+    const scoreTxt = r.uncertainty > 5
+      ? `${r.trust_score}<span style="font-size:11px;font-weight:500;display:block">–${r.trust_hi}</span>`
+      : r.trust_score;
+    div.innerHTML = `
+      <div class="name">${esc(r.name)}</div>
+      <div class="score-badge ${scoreClass(r.trust_score)}" title="${esc(r.tier)}">${scoreTxt}</div>
+      <div class="loc">${esc(r.city || "—")}, ${esc(r.state || "—")} · ${esc(r.tier)}</div>
+      <div class="sig">${corrTag}${geoTag}${penTag}${uncTag}</div>`;
+    div.onclick = () => {
+      document.querySelectorAll(".frow").forEach(x => x.classList.remove("sel"));
+      div.classList.add("sel");
+      loadDetail(r.unique_id);
+    };
+    $("list").appendChild(div);
+  }
 }
 
 // ---- detail + citations ----
@@ -289,8 +324,22 @@ function loadDetail(id) {
       citeBlock(`Corroborating ${k}`, c[k], kws, true)).join("");
     const noCorr = corrFields.length === 0
       ? `<section><span class="empty-note">⚠ No independent corroboration found in equipment, procedures, or description. This is a bare claim.</span></section>` : "";
+    const uncBar = f.uncertainty > 0 ? `
+      <div style="margin:6px 0 2px;font-size:12.5px;color:var(--muted)">
+        Observed evidence supports <b style="color:var(--text)">${f.trust_score}</b>.
+        If the ${3 - (f.obs_fields ?? 3)} unobservable field(s) were favorable it could reach
+        <b style="color:var(--text)">${f.trust_hi}</b> — data deficit
+        <b style="color:${f.evidence_label === "speculative" ? "var(--bad)" : "var(--warn)"}">
+        ${f.uncertainty} pts (${esc(f.evidence_label)})</b>. Absence of data is uncertainty,
+        not absence of care.
+      </div>
+      <div style="height:6px;border-radius:3px;background:var(--border);position:relative;margin-bottom:10px">
+        <div style="position:absolute;left:${f.trust_score}%;width:${Math.max(1, f.trust_hi - f.trust_score)}%;height:6px;border-radius:3px;background:repeating-linear-gradient(45deg,var(--warn),var(--warn) 3px,transparent 3px,transparent 6px)"></div>
+        <div style="position:absolute;left:0;width:${f.trust_score}%;height:6px;border-radius:3px;background:var(--accent)"></div>
+      </div>` : "";
     const breakdown = `
-      <section><h3>Trust score breakdown — ${f.trust_score} · ${esc(f.tier)}</h3>
+      <section><h3>Trust score breakdown — ${f.trust_score}${f.uncertainty > 5 ? "–" + f.trust_hi : ""} · ${esc(f.tier)} · evidence ${esc(f.evidence_label || "")}</h3>
+      ${uncBar}
         <div class="facts">
           <div class="fact"><div class="k">Corroboration /40</div><div class="v">${f.corr_score}</div></div>
           <div class="fact"><div class="k">Completeness /20</div><div class="v">${f.completeness_score}</div></div>
@@ -315,6 +364,15 @@ function loadDetail(id) {
         <div id="verifyOut"></div>
       </section>
       <section><h3>Full description</h3><div class="desc">${highlight(f.description || "—", kws)}</div></section>
+      <section><h3>Shortlist (persists across sessions)</h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="slName" list="slNames" placeholder="Shortlist name" value="My program"
+            style="max-width:200px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13px">
+          <datalist id="slNames"></datalist>
+          <button class="obtn" id="slBtn">☆ Add to shortlist</button>
+          <span class="status" id="slStatus" style="color:var(--muted);font-size:12.5px"></span>
+        </div>
+      </section>
       <section><h3>Your assessment (persists across sessions)</h3>
         <div id="override">
           <div class="btns">
@@ -338,7 +396,32 @@ function loadDetail(id) {
     });
     $("ovSave").onclick = saveOverride;
     $("verifyBtn").onclick = runVerify;
+    $("slBtn").onclick = toggleShortlist;
+    $("slNames").innerHTML = shortlists.map(s => `<option value="${esc(s.name)}">`).join("");
+    syncShortlistBtn();
     renderOverrides(ovs);
+  });
+}
+
+function syncShortlistBtn() {
+  const name = $("slName")?.value.trim();
+  const sl = shortlists.find(s => s.name === name);
+  const member = !!(sl && (sl.facility_ids || []).includes(curFacility));
+  if ($("slBtn")) $("slBtn").textContent = member ? "★ Remove from shortlist" : "☆ Add to shortlist";
+}
+
+function toggleShortlist() {
+  const name = $("slName").value.trim() || "My program";
+  $("slStatus").textContent = "Saving…";
+  fetch("/api/shortlists/toggle", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({name, facility_id: curFacility}),
+  }).then(r => r.json()).then(d => {
+    if (d.error) { $("slStatus").textContent = "Error: " + d.error; return; }
+    $("slStatus").textContent = d.member
+      ? `Saved ✓ “${d.name}” now has ${d.count} facilities (Lakebase)`
+      : `Removed — “${d.name}” has ${d.count} left`;
+    refreshShortlists().then(syncShortlistBtn);
   });
 }
 
