@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trust Desk — Crisis Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #262d36; --text: #e6edf3;
+    --muted: #8b949e; --accent: #ff5f46; --good: #3fb950; --warn: #d29922; --bad: #f85149;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 14px 28px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  header h1 { font-size: 18px; font-weight: 650; }
+  header a { color: var(--accent); font-size: 13px; text-decoration: none; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--panel); color: var(--text); font-size: 12.5px; cursor: pointer; }
+  .chip.active { background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .toggle { display: flex; gap: 6px; margin-left: auto; }
+  main { display: flex; height: calc(100vh - 55px); }
+  #map { flex: 1; background: #0a0e13; }
+  #side { flex: 0 0 340px; border-left: 1px solid var(--border); overflow-y: auto; padding: 16px 18px; }
+  #side h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin: 14px 0 8px; }
+  .legend { font-size: 12.5px; line-height: 1.9; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 12px; margin-bottom: 8px; font-size: 13px; }
+  .stat b { font-size: 18px; display: block; }
+  .drow { padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+  .drow .st { color: var(--muted); }
+  .badgeo { background: rgba(248,81,73,.08); border: 1px solid rgba(248,81,73,.35);
+    border-radius: 10px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 10px; }
+  .leaflet-container { font: inherit; }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--panel); color: var(--text); }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Crisis Map</h1>
+    <a href="/">← Trust Desk</a>
+    <div class="chips" id="capChips"></div>
+    <div class="toggle chips">
+      <button class="chip active" id="modeFac">Facilities</button>
+      <button class="chip" id="modeDist">Districts</button>
+    </div>
+  </header>
+  <main>
+    <div id="map"></div>
+    <div id="side">
+      <div id="stats"></div>
+      <h3>Legend</h3>
+      <div class="legend" id="legend"></div>
+      <div id="badgeo"></div>
+      <h3 id="listTitle"></h3>
+      <div id="dlist"></div>
+    </div>
+  </main>
+<script>
+const CAPS = ["icu","nicu","emergency","maternity","oncology","trauma","dialysis","surgery"];
+const LBL = {icu:"ICU",nicu:"NICU",emergency:"Emergency",maternity:"Maternity",
+  oncology:"Oncology",trauma:"Trauma",dialysis:"Dialysis",surgery:"Surgery"};
+let cap = "maternity", mode = "fac", layer = null;
+const $ = id => document.getElementById(id);
+const esc = s => (s ?? "").toString().replace(/[&<>"']/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+const map = L.map("map", {zoomControl: true}).setView([22.5, 80], 5);
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+  {attribution: "© OpenStreetMap © CARTO", maxZoom: 18}).addTo(map);
+
+for (const c of CAPS) {
+  const b = document.createElement("button");
+  b.className = "chip" + (c === cap ? " active" : ""); b.textContent = LBL[c]; b.dataset.cap = c;
+  b.onclick = () => { cap = c;
+    document.querySelectorAll("#capChips .chip").forEach(x => x.classList.toggle("active", x.dataset.cap === c));
+    render(); };
+  $("capChips").appendChild(b);
+}
+$("modeFac").onclick = () => { mode = "fac"; $("modeFac").classList.add("active"); $("modeDist").classList.remove("active"); render(); };
+$("modeDist").onclick = () => { mode = "dist"; $("modeDist").classList.add("active"); $("modeFac").classList.remove("active"); render(); };
+
+const FAC_COLORS = c => c >= 2 ? "#3fb950" : c === 1 ? "#d29922" : "#f85149";
+const DIST_COLORS = {data_desert: "#6e40c9", no_capability: "#f85149", unverified: "#d29922", covered: "#3fb950"};
+
+function render() { if (layer) { map.removeLayer(layer); layer = null; } mode === "fac" ? renderFac() : renderDist(); }
+
+function renderFac() {
+  $("legend").innerHTML = `
+    <div><span class="dot" style="background:#3fb950"></span>Claim corroborated by 2+ fields</div>
+    <div><span class="dot" style="background:#d29922"></span>Corroborated by 1 field</div>
+    <div><span class="dot" style="background:#f85149"></span>Claim only — no independent evidence</div>`;
+  $("listTitle").textContent = "";  $("dlist").innerHTML = "";
+  fetch(`/api/map?capability=${cap}`).then(r => r.json()).then(d => {
+    if (d.error) { $("stats").innerHTML = esc(d.error); return; }
+    const pts = d.points, corr2 = pts.filter(p => p.corr >= 2).length,
+      corr1 = pts.filter(p => p.corr === 1).length, corr0 = pts.filter(p => p.corr === 0).length;
+    $("stats").innerHTML = `
+      <div class="stat"><b>${pts.length}</b>facilities claim ${LBL[cap]}</div>
+      <div class="stat" style="color:var(--bad)"><b>${corr0}</b>are claim-only (${(100*corr0/pts.length).toFixed(0)}%) — the trust desert</div>`;
+    $("badgeo").innerHTML = d.bad_geo.length ? `<div class="badgeo">⚠ <b>${d.bad_geo.length}</b> facilities claiming ${LBL[cap]} have coordinates outside India entirely — e.g. ${esc(d.bad_geo[0].name)} (${d.bad_geo[0].latitude.toFixed(1)}, ${d.bad_geo[0].longitude.toFixed(1)}). Not shown on map; excluded from geo trust.</div>` : "";
+    layer = L.layerGroup(pts.map(p =>
+      L.circleMarker([p.latitude, p.longitude], {
+        radius: 4, weight: 0, fillOpacity: .75, fillColor: FAC_COLORS(p.corr),
+      }).bindPopup(`<b>${esc(p.name)}</b><br>${esc(p.city || "")}, ${esc(p.state || "")}<br>
+        Trust ${p.trust_score} · ${esc(p.tier)}<br>${p.corr}/3 fields corroborate<br>
+        <a href="/?f=${p.unique_id}&cap=${cap}">Inspect evidence →</a>`)
+    )).addTo(map);
+  });
+}
+
+function renderDist() {
+  $("legend").innerHTML = `
+    <div><span class="dot" style="background:#6e40c9"></span><b>Data desert</b> — zero facilities known (≠ zero care!)</div>
+    <div><span class="dot" style="background:#f85149"></span>No ${LBL[cap]} claims in district</div>
+    <div><span class="dot" style="background:#d29922"></span>Claims exist, none corroborated</div>
+    <div><span class="dot" style="background:#3fb950"></span>≥1 corroborated facility</div>`;
+  fetch(`/api/districts?capability=${cap}`).then(r => r.json()).then(rows => {
+    if (rows.error) { $("stats").innerHTML = esc(rows.error); return; }
+    const by = s => rows.filter(r => r.status === s).length;
+    $("stats").innerHTML = `
+      <div class="stat"><b>${rows.length}</b>districts (postal directory)</div>
+      <div class="stat" style="color:#6e40c9"><b>${by("data_desert")}</b>data deserts — we simply don't know</div>
+      <div class="stat" style="color:var(--warn)"><b>${by("unverified")}</b>districts where every ${LBL[cap]} claim is unverified</div>`;
+    $("badgeo").innerHTML = "";
+    layer = L.layerGroup(rows.map(r =>
+      L.circleMarker([r.lat, r.lon], {
+        radius: r.status === "covered" ? 3 : 5, weight: 0, fillOpacity: .65,
+        fillColor: DIST_COLORS[r.status],
+      }).bindPopup(`<b>${esc(r.district)}</b> (${esc(r.state)})<br>
+        ${r.n_fac} facilities · ${r.n_claim} claim ${LBL[cap]} · ${r.n_corr} corroborated<br>
+        ${r.inst_birth_pct != null ? "NFHS institutional births: " + r.inst_birth_pct + "%" : "No NFHS data"}<br>
+        Status: ${r.status.replace("_", " ")}`)
+    )).addTo(map);
+    const worst = rows.filter(r => r.status === "unverified" && r.inst_birth_pct != null)
+      .sort((a, b) => a.inst_birth_pct - b.inst_birth_pct).slice(0, 12);
+    $("listTitle").textContent = `Highest-risk unverified districts (low institutional births)`;
+    $("dlist").innerHTML = worst.map(r => `
+      <div class="drow"><b>${esc(r.district)}</b> <span class="st">${esc(r.state)}</span><br>
+        ${r.n_claim} ${LBL[cap]} claims, 0 corroborated · inst. births ${r.inst_birth_pct}%</div>`).join("");
+  });
+}
+
+render();
+</script>
+</body>
+</html>

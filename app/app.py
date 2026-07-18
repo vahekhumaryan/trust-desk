@@ -174,6 +174,84 @@ def init_db():
         app.state.pg_error = str(e)
 
 
+# ---- Map: medical desert vs data desert --------------------------------------
+@app.get("/api/map")
+def map_points(capability: str):
+    if capability not in CAPABILITY_KEYWORDS:
+        return JSONResponse(status_code=400, content={"error": "unknown capability"})
+    cache_key = f"map:{capability}"
+    cached = _cached(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        rows = run_query(
+            f"""SELECT unique_id, name, city, state, latitude, longitude,
+                       corr_{capability} AS corr, trust_score, tier, geo_in_india
+                FROM {TRUST}
+                WHERE claim_{capability} AND latitude IS NOT NULL"""
+        )
+        result = {
+            "points": [r for r in rows if r["geo_in_india"]],
+            "bad_geo": [r for r in rows if not r["geo_in_india"]],
+        }
+        _store(cache_key, result)
+        return result
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/districts")
+def district_gaps(capability: str):
+    """Per-district coverage: separates 'no facilities known here' (data desert)
+    from 'facilities exist but claims are uncorroborated' (trust desert)."""
+    if capability not in CAPABILITY_KEYWORDS:
+        return JSONResponse(status_code=400, content={"error": "unknown capability"})
+    cache_key = f"districts:{capability}"
+    cached = _cached(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        rows = run_query(
+            f"""
+WITH districts AS (
+  SELECT lower(trim(district)) d, first(trim(district)) district,
+         first(trim(statename)) state,
+         avg(try_cast(latitude AS double)) lat, avg(try_cast(longitude AS double)) lon
+  FROM workspace.hackathon.pincodes GROUP BY 1
+),
+fac AS (
+  SELECT lower(trim(pin_district)) d,
+         count(*) n_fac,
+         sum(CASE WHEN claim_{capability} THEN 1 ELSE 0 END) n_claim,
+         sum(CASE WHEN claim_{capability} AND corr_{capability} >= 1 THEN 1 ELSE 0 END) n_corr
+  FROM {TRUST} WHERE pin_district IS NOT NULL GROUP BY 1
+),
+need AS (
+  SELECT lower(trim(district_name)) d,
+         first(try_cast(institutional_birth_5y_pct AS double)) inst_birth_pct
+  FROM workspace.hackathon.nfhs GROUP BY 1
+)
+SELECT di.district, di.state, di.lat, di.lon,
+       coalesce(f.n_fac, 0) n_fac, coalesce(f.n_claim, 0) n_claim,
+       coalesce(f.n_corr, 0) n_corr, n.inst_birth_pct,
+       CASE
+         WHEN coalesce(f.n_fac, 0) = 0 THEN 'data_desert'
+         WHEN coalesce(f.n_claim, 0) = 0 THEN 'no_capability'
+         WHEN coalesce(f.n_corr, 0) = 0 THEN 'unverified'
+         ELSE 'covered'
+       END AS status
+FROM districts di
+LEFT JOIN fac f ON di.d = f.d
+LEFT JOIN need n ON di.d = n.d
+WHERE di.lat BETWEEN 6 AND 37 AND di.lon BETWEEN 68 AND 98
+"""
+        )
+        _store(cache_key, rows)
+        return rows
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 # ---- LLM evidence verifier (on-demand, cached, MLflow-traced) ----------------
 SERVING_ENDPOINT = os.getenv("VERIFIER_ENDPOINT", "databricks-gpt-oss-120b")
 MLFLOW_EXPERIMENT_ID = os.getenv("MLFLOW_EXPERIMENT_ID", "4503398429584691")

@@ -130,6 +130,7 @@
   <header>
     <h1>Trust Desk</h1>
     <span class="sub">Can this facility do what it claims? · Databricks × Virtue Foundation</span>
+    <a href="/map.html" style="color:var(--accent);font-size:13px;text-decoration:none">Crisis Map →</a>
     <span id="stats"></span>
   </header>
   <main>
@@ -186,6 +187,15 @@ for (const c of CAPS) {
     loadList();
   };
   $("capChips").appendChild(b);
+}
+
+// deep link from the map: /?f=<facility_id>&cap=<capability>
+const qp = new URLSearchParams(location.search);
+if (qp.get("cap") && CAPS.includes(qp.get("cap"))) {
+  curCap = qp.get("cap");
+  document.querySelectorAll(".chip").forEach(x => x.classList.toggle("active", x.dataset.cap === curCap));
+  loadList();
+  if (qp.get("f")) loadDetail(qp.get("f"));
 }
 
 // ---- ranked list ----
