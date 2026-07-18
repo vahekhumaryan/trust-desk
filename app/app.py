@@ -174,6 +174,49 @@ def init_db():
         app.state.pg_error = str(e)
 
 
+# ---- Semantic search (Vector Search) -----------------------------------------
+VS_INDEX = "workspace.hackathon.facility_text_index"
+
+
+@app.get("/api/search")
+def semantic_search(q: str, state: str | None = None):
+    try:
+        w = WorkspaceClient()
+        kwargs = {}
+        if state:
+            kwargs["filters_json"] = json.dumps({"state": state})
+        res = w.vector_search_indexes.query_index(
+            index_name=VS_INDEX,
+            columns=["unique_id", "name", "city", "state", "content"],
+            query_text=q,
+            num_results=15,
+            **kwargs,
+        )
+        cols = [c.name for c in res.manifest.columns]
+        hits = [dict(zip(cols, row)) for row in (res.result.data_array or [])]
+        if not hits:
+            return {"results": []}
+        # join trust scores for the hit set
+        ids = [h["unique_id"] for h in hits]
+        ph = ",".join("?" * len(ids))
+        trows = run_query(
+            f"SELECT unique_id, trust_score, tier FROM {TRUST} WHERE unique_id IN ({ph})",
+            ids,
+        )
+        tmap = {t["unique_id"]: t for t in trows}
+        for h in hits:
+            h["score"] = h.pop("score", None)
+            # keep only the first matching line of content as a snippet
+            h["snippet"] = (h.pop("content", "") or "")[:220]
+            h.update(tmap.get(h["unique_id"], {}))
+        return {"results": hits}
+    except Exception as e:
+        msg = str(e)
+        if "not ready" in msg.lower() or "PENDING" in msg or "provisioning" in msg.lower():
+            msg = "Semantic index is still syncing — try again in a few minutes."
+        return JSONResponse(status_code=503, content={"error": msg})
+
+
 # ---- Map: medical desert vs data desert --------------------------------------
 @app.get("/api/map")
 def map_points(capability: str):

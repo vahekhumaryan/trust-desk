@@ -137,7 +137,11 @@
     <div id="left">
       <div id="controls">
         <div class="chips" id="capChips"></div>
-        <select id="stateSel"><option value="">All states</option></select>
+        <div style="display:flex;gap:8px">
+          <select id="stateSel"><option value="">All states</option></select>
+          <input id="semQ" placeholder='or ask: "dialysis with transplant support"'
+            style="flex:1;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px">
+        </div>
       </div>
       <div id="list"><div id="loading">Pick a capability to rank facilities.</div></div>
     </div>
@@ -177,6 +181,34 @@ fetch("/api/states").then(r => r.json()).then(rows => {
   }
 });
 $("stateSel").onchange = () => { curState = $("stateSel").value; if (curCap) loadList(); };
+$("semQ").addEventListener("keydown", e => { if (e.key === "Enter" && $("semQ").value.trim()) semanticSearch(); });
+
+function semanticSearch() {
+  const q = $("semQ").value.trim();
+  $("list").innerHTML = `<div id="loading">Searching 10,088 facilities semantically…</div>`;
+  const u = new URLSearchParams({q});
+  if (curState) u.set("state", curState);
+  fetch("/api/search?" + u).then(r => r.json()).then(d => {
+    if (d.error) { $("list").innerHTML = `<div id="loading">${esc(d.error)}</div>`; return; }
+    if (!d.results.length) { $("list").innerHTML = `<div id="loading">No matches.</div>`; return; }
+    $("list").innerHTML = "";
+    for (const r of d.results) {
+      const div = document.createElement("div");
+      div.className = "frow";
+      div.innerHTML = `
+        <div class="name">${esc(r.name)}</div>
+        <div class="score-badge ${scoreClass(r.trust_score ?? 0)}">${r.trust_score ?? "—"}</div>
+        <div class="loc">${esc(r.city || "—")}, ${esc(r.state || "—")} · ${esc(r.tier || "")}</div>
+        <div class="sig"><span class="tag">semantic match</span></div>`;
+      div.onclick = () => {
+        document.querySelectorAll(".frow").forEach(x => x.classList.remove("sel"));
+        div.classList.add("sel");
+        loadDetail(r.unique_id);
+      };
+      $("list").appendChild(div);
+    }
+  });
+}
 
 for (const c of CAPS) {
   const b = document.createElement("button");
