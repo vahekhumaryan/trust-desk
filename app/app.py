@@ -260,6 +260,7 @@ def semantic_search(q: str, state: str | None = None):
             index_name=VS_INDEX,
             columns=["unique_id", "name", "city", "state", "content"],
             query_text=q,
+            query_type="HYBRID",
             num_results=15,
             **kwargs,
         )
@@ -329,6 +330,7 @@ def refer(q: str, near: str):
             index_name=VS_INDEX,
             columns=["unique_id", "name", "city", "state", "latitude", "longitude", "content"],
             query_text=q,
+            query_type="HYBRID",
             num_results=50,
         )
         cols = [c.name for c in res.manifest.columns]
