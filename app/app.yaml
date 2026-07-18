@@ -9,3 +9,5 @@ command:
 env:
   - name: DATABRICKS_WAREHOUSE_ID
     value: "4c8cec5ddedd872b"
+  - name: LAKEBASE_ENDPOINT
+    value: "projects/trust-desk-db/branches/production/endpoints/primary"
