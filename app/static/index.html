@@ -418,6 +418,10 @@ function loadDetail(id) {
         <div id="verifyOut"></div>
       </section>
       <section><h3>Full description</h3><div class="desc">${highlight(f.description || "—", kws)}</div></section>
+      <section>
+        <button class="obtn" id="cmpBtn"></button>
+        <span class="status" id="cmpHint" style="color:var(--muted);font-size:12.5px;margin-left:8px"></span>
+      </section>
       <section><h3>Shortlist (persists across sessions)</h3>
         <div style="display:flex;gap:8px;align-items:center">
           <input id="slName" list="slNames" placeholder="Shortlist name" value="My program"
@@ -451,10 +455,35 @@ function loadDetail(id) {
     $("ovSave").onclick = saveOverride;
     $("verifyBtn").onclick = runVerify;
     $("slBtn").onclick = toggleShortlist;
+    syncCompareBtn();
+    $("cmpBtn").onclick = () => {
+      const pinned = sessionStorage.getItem("cmpA");
+      if (pinned && pinned !== curFacility) {
+        location.href = `/compare.html?a=${pinned}&b=${curFacility}&cap=${curCap}`;
+      } else {
+        sessionStorage.setItem("cmpA", curFacility);
+        syncCompareBtn();
+      }
+    };
     $("slNames").innerHTML = shortlists.map(s => `<option value="${esc(s.name)}">`).join("");
     syncShortlistBtn();
     renderOverrides(ovs);
   });
+}
+
+function syncCompareBtn() {
+  const pinned = sessionStorage.getItem("cmpA");
+  if (!$("cmpBtn")) return;
+  if (pinned && pinned !== curFacility) {
+    $("cmpBtn").textContent = "⊞ Compare with pinned facility";
+    $("cmpHint").textContent = "Opens side-by-side evidence view";
+  } else if (pinned === curFacility) {
+    $("cmpBtn").textContent = "⊞ Pinned for compare";
+    $("cmpHint").textContent = "Open another facility, then press Compare";
+  } else {
+    $("cmpBtn").textContent = "⊞ Pin for compare";
+    $("cmpHint").textContent = "Pin this facility, then open another to compare evidence";
+  }
 }
 
 function syncShortlistBtn() {

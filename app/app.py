@@ -75,7 +75,7 @@ app = FastAPI(title="Trust Desk")
 # ---- simple in-process cache -------------------------------------------------
 _cache: dict = {}
 _cache_lock = threading.Lock()
-CACHE_TTL_SECONDS = 600
+CACHE_TTL_SECONDS = 1800
 
 
 def _cached(key: str, ttl: int = CACHE_TTL_SECONDS):
@@ -174,6 +174,22 @@ def init_db():
     except Exception as e:
         app.state.pg_ready = False
         app.state.pg_error = str(e)
+    threading.Thread(target=_warm_caches, daemon=True).start()
+
+
+def _warm_caches():
+    """Pre-run the demo-critical queries so first clicks are instant."""
+    try:
+        stats()
+        states()
+        for cap in CAPABILITY_KEYWORDS:
+            facilities(cap)
+        for cap in ("maternity", "icu", "nicu"):
+            map_points(cap)
+            district_gaps(cap)
+        review_queue()
+    except Exception:
+        pass  # warmup must never take the app down
 
 
 # ---- Shortlists (Lakebase persistence) ---------------------------------------

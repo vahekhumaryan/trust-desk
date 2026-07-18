@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏥</text></svg>">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trust Desk — Compare evidence</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --border:#262d36; --text:#e6edf3;
+    --muted:#8b949e; --accent:#ff5f46; --good:#3fb950; --warn:#d29922; --bad:#f85149; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); line-height: 1.5;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 14px 28px; border-bottom: 1px solid var(--border); display: flex; gap: 14px; align-items: baseline; }
+  header h1 { font-size: 18px; }
+  header a { color: var(--accent); font-size: 13px; text-decoration: none; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 0; min-height: calc(100vh - 53px); }
+  .col { padding: 24px 28px; overflow-y: auto; }
+  .col + .col { border-left: 1px solid var(--border); }
+  h2 { font-size: 18px; margin-bottom: 2px; }
+  .loc { color: var(--muted); font-size: 12.5px; margin-bottom: 12px; }
+  .scorebar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .score-badge { font-size: 22px; font-weight: 700; padding: 10px 16px; border-radius: 12px; }
+  .score-hi { background: rgba(63,185,80,.12); color: var(--good); }
+  .score-mid { background: rgba(210,153,34,.12); color: var(--warn); }
+  .score-lo { background: rgba(248,81,73,.12); color: var(--bad); }
+  .tierline { font-size: 13px; color: var(--muted); }
+  .facts { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .fact { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font-size: 12.5px; }
+  .fact b { display: block; font-size: 14px; }
+  h3 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 0 6px; }
+  .cite { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 8px 11px; font-size: 13px; margin-bottom: 5px; }
+  .cite.corr { border-left-color: var(--good); }
+  mark { background: rgba(255,95,70,.25); color: inherit; border-radius: 3px; padding: 0 2px; }
+  .warn-note { color: var(--warn); font-size: 13px; margin: 8px 0; }
+  #loading { padding: 30px; color: var(--muted); }
+</style>
+</head>
+<body>
+  <header><h1>Evidence, side by side</h1><a href="/">← Trust Desk</a><span id="capLabel" style="color:var(--muted);font-size:13px"></span></header>
+  <main>
+    <div class="col" id="colA"><div id="loading">Loading…</div></div>
+    <div class="col" id="colB"><div id="loading">Loading…</div></div>
+  </main>
+<script>
+const qp = new URLSearchParams(location.search);
+const cap = qp.get("cap") || "icu";
+document.getElementById("capLabel").textContent = "Capability: " + cap.toUpperCase();
+const esc = s => (s ?? "").toString().replace(/[&<>"']/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function highlight(text, patterns) {
+  let out = esc(text);
+  for (const p of patterns || []) {
+    try { out = out.replace(new RegExp("(" + p + ")", "gi"), "<mark>$1</mark>"); } catch (e) {}
+  }
+  return out;
+}
+const scoreClass = s => s >= 60 ? "score-hi" : s >= 35 ? "score-mid" : "score-lo";
+
+function citeBlock(title, items, kws, corr) {
+  if (!items || !items.length) return "";
+  return `<h3>${title}</h3>` + items.map(c =>
+    `<div class="cite ${corr ? "corr" : ""}">${highlight(c, kws)}</div>`).join("");
+}
+
+function render(el, f) {
+  const kws = f.matched_keywords || [];
+  const c = f.citations || {};
+  const corrFields = ["equipment", "procedure", "description"].filter(k => (c[k] || []).length);
+  el.innerHTML = `
+    <h2>${esc(f.name)}</h2>
+    <div class="loc">${esc(f.address_city || "")}, ${esc(f.address_stateOrRegion || "")}</div>
+    <div class="scorebar">
+      <div class="score-badge ${scoreClass(f.trust_score)}">${f.trust_score}${f.uncertainty > 5 ? "–" + f.trust_hi : ""}</div>
+      <div class="tierline">${esc(f.tier)} · evidence ${esc(f.evidence_label || "")}<br>
+        corr ${f.corr_score}/40 · compl ${f.completeness_score}/20 · web ${f.web_score}/25 · geo ${f.geo_score}/15${f.penalty > 0 ? ` · <span style="color:var(--bad)">−${f.penalty}</span>` : ""}</div>
+    </div>
+    <div class="facts">
+      <div class="fact">Doctors<b>${esc(f.numberDoctors ?? "—")}</b></div>
+      <div class="fact">Beds<b>${esc(f.capacity ?? "—")}</b></div>
+      <div class="fact">Est.<b>${esc(f.yearEstablished ?? "—")}</b></div>
+      <div class="fact">Website<b>${esc(f.officialWebsite || "—")}</b></div>
+    </div>
+    ${citeBlock("Capability claims", c.capability, kws, false)}
+    ${corrFields.map(k => citeBlock("Corroborating " + k, c[k], kws, true)).join("")}
+    ${corrFields.length === 0 ? `<div class="warn-note">⚠ No independent corroboration — bare claim.</div>` : ""}`;
+}
+
+for (const [param, colId] of [["a", "colA"], ["b", "colB"]]) {
+  const id = qp.get(param);
+  const el = document.getElementById(colId);
+  if (!id) { el.innerHTML = `<div id="loading">No facility selected.</div>`; continue; }
+  fetch(`/api/facility/${encodeURIComponent(id)}?capability=${cap}`)
+    .then(r => r.json())
+    .then(f => f.error ? el.innerHTML = `<div id="loading">${esc(f.error)}</div>` : render(el, f))
+    .catch(e => el.innerHTML = `<div id="loading">${esc(String(e))}</div>`);
+}
+</script>
+</body>
+</html>
